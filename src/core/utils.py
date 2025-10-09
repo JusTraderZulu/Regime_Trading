@@ -128,3 +128,17 @@ def get_huggingface_token() -> str:
     """Get Hugging Face API token from environment"""
     return get_env_var("HUGGINGFACE_API_TOKEN", required=False) or ""
 
+
+def get_perplexity_api_key() -> str:
+    """Get Perplexity API key from file or environment"""
+    # Try file first
+    try:
+        key_file = Path("perp_key.txt")
+        if key_file.exists():
+            return key_file.read_text().strip()
+    except Exception:
+        pass
+    
+    # Fallback to environment variable
+    return get_env_var("PERPLEXITY_API_KEY", required=False) or ""
+

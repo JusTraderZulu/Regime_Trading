@@ -4,6 +4,7 @@
 polygon_key.txt
 open_ai.txt
 hugging_face.txt
+perp_key.txt
 .env
 .env.local
 *.key

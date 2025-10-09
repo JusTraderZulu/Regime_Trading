@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Optional
 
 from src.core.llm import get_llm_client
+from src.core.market_intelligence import get_market_intelligence_client
 from src.core.schemas import ExecReport, RegimeLabel
 from src.core.state import PipelineState
 
@@ -122,23 +123,80 @@ def summarizer_node(state: PipelineState) -> dict:
     # Get strategy_comparison early for LLM prompt
     strategy_comparison = state.get("strategy_comparison_mt")
     
-    # Try to generate LLM-enhanced analysis
-    llm_client = get_llm_client()
-    if llm_client.enabled:
-        logger.info("Generating AI-enhanced market intelligence...")
-        try:
-            # Prepare comprehensive prompt data
-            features_mt = state.get("features_mt")
-            features_st = state.get("features_st")
-            
-            # Build rich context for LLM with regime characteristics
-            hurst_ci = f"(CI: {features_mt.hurst_rs_lower:.2f}-{features_mt.hurst_rs_upper:.2f})" if features_mt and features_mt.hurst_rs_lower else ""
-            
-            # Interpret regime strength
-            hurst_strength = "strong" if regime_mt.hurst_avg > 0.60 else ("moderate" if regime_mt.hurst_avg > 0.52 else "weak")
-            vol_level = "high" if (features_mt.returns_vol if features_mt else 0) > 0.03 else "moderate"
-            
-            regime_data = f"""
+    # Different LLM analysis based on mode
+    # FAST mode: Market intelligence (internet-connected, no trading advice)
+    # THOROUGH mode: Trading recommendations (parameter optimization, TP/SL)
+    
+    if run_mode == "fast":
+        # Use internet-connected LLM for market intelligence
+        market_intel_client = get_market_intelligence_client(provider="perplexity")
+        
+        if market_intel_client.enabled:
+            logger.info("Generating market intelligence with internet context...")
+            try:
+                # Get current price
+                data_st_df = state.get("data_st")
+                current_price = None
+                if data_st_df is not None and not data_st_df.empty:
+                    current_price = float(data_st_df["close"].iloc[-1])
+                
+                # Prepare regime data
+                regime_info = {
+                    'label': mt_regime.value,
+                    'confidence': mt_confidence,
+                    'lt_regime': regime_lt.label.value if regime_lt else 'N/A',
+                    'st_regime': regime_st.label.value if regime_st else 'N/A',
+                }
+                
+                # Prepare features
+                features_mt_data = state.get("features_mt")
+                feature_info = {
+                    'hurst_avg': regime_mt.hurst_avg if regime_mt else 0.5,
+                    'vr_statistic': regime_mt.vr_statistic if regime_mt else 1.0,
+                    'volatility': features_mt_data.returns_vol if features_mt_data else 0.0,
+                }
+                
+                # Generate market intelligence
+                market_intel = market_intel_client.generate_market_intelligence(
+                symbol=symbol,
+                    regime_data=regime_info,
+                    features=feature_info,
+                    current_price=current_price,
+                )
+                
+                if market_intel:
+                    summary_lines.extend([
+                        "---",
+                        "",
+                        "## 🌐 Market Intelligence (Internet-Connected Analysis)",
+                        "",
+                        market_intel,
+                        "",
+                    ])
+            except Exception as e:
+                logger.warning(f"Market intelligence generation failed: {e}")
+        else:
+            logger.debug("Market intelligence LLM not enabled")
+    
+    # THOROUGH mode: Trading-focused LLM analysis with web search
+    elif run_mode == "thorough":
+        # Use Perplexity for thorough mode too (web search helps with parameter optimization)
+        llm_client = get_market_intelligence_client(provider="perplexity")
+        if llm_client.enabled:
+            logger.info("Generating AI-enhanced trading recommendations...")
+            try:
+                # Prepare comprehensive prompt data
+                features_mt = state.get("features_mt")
+                features_st = state.get("features_st")
+                
+                # Build rich context for LLM with regime characteristics
+                hurst_ci = f"(CI: {features_mt.hurst_rs_lower:.2f}-{features_mt.hurst_rs_upper:.2f})" if features_mt and features_mt.hurst_rs_lower else ""
+                
+                # Interpret regime strength
+                hurst_strength = "strong" if regime_mt.hurst_avg > 0.60 else ("moderate" if regime_mt.hurst_avg > 0.52 else "weak")
+                vol_level = "high" if (features_mt.returns_vol if features_mt else 0) > 0.03 else "moderate"
+                
+                regime_data = f"""
 **Multi-Tier Regimes:**
 - LT (1D): {regime_lt.label.value if regime_lt else 'N/A'} ({regime_lt.confidence:.0%} conf)
 - MT (4H): {mt_regime.value} ({mt_confidence:.0%} conf) - PRIMARY
@@ -154,23 +212,23 @@ def summarizer_node(state: PipelineState) -> dict:
 
 **Key Insight:** This is a {hurst_strength} {mt_regime.value} regime with {vol_level} volatility.
 """
-            
-            backtest_data = ""
-            strategy_params_str = ""
-            comparison_context = ""
-            
-            # Add strategy comparison context
-            if strategy_comparison and len(strategy_comparison) > 1:
-                comparison_context = "\n**All Strategies Tested (MT 4H):**\n"
-                for name, result in sorted(strategy_comparison.items(), key=lambda x: x[1].sharpe, reverse=True):
-                    comparison_context += f"- {name}: Sharpe {result.sharpe:.2f}, MaxDD {result.max_drawdown:.1%}\n"
-            
-            if backtest_st:
-                # Get strategy parameters that were used
-                strategy_params = backtest_st.strategy.params
-                strategy_params_str = ", ".join([f"{k}={v}" for k, v in strategy_params.items()]) if strategy_params else "default"
                 
-                backtest_data = f"""
+                backtest_data = ""
+                strategy_params_str = ""
+                comparison_context = ""
+                
+                # Add strategy comparison context
+                if strategy_comparison and len(strategy_comparison) > 1:
+                    comparison_context = "\n**All Strategies Tested (MT 4H):**\n"
+                    for name, result in sorted(strategy_comparison.items(), key=lambda x: x[1].sharpe, reverse=True):
+                        comparison_context += f"- {name}: Sharpe {result.sharpe:.2f}, MaxDD {result.max_drawdown:.1%}\n"
+                
+                if backtest_st:
+                    # Get strategy parameters that were used
+                    strategy_params = backtest_st.strategy.params
+                    strategy_params_str = ", ".join([f"{k}={v}" for k, v in strategy_params.items()]) if strategy_params else "default"
+                    
+                    backtest_data = f"""
 **Selected Strategy (Executed on ST 15m):**
 - Strategy: {backtest_st.strategy.name}
 - Parameters Used: {strategy_params_str}
@@ -184,40 +242,42 @@ def summarizer_node(state: PipelineState) -> dict:
   - Avg Win/Loss: {backtest_st.avg_win:.2%} / {backtest_st.avg_loss:.2%}
   - Consecutive Losses (max): {backtest_st.max_consecutive_losses}
 """
-            
-            ccm_data = ccm_st.notes if ccm_st else "No cross-asset data available"
-            
-            contra_data = "\n".join(contradictor_st.contradictions) if contradictor_st and contradictor_st.contradictions else "No contradictions found"
-            
-            # Get current price and volatility for TP/SL calculations
-            features_st_data = state.get("features_st")
-            data_st_df = state.get("data_st")
-            
-            current_price = None
-            atr_estimate = None
-            volatility = None
-            
-            if data_st_df is not None and not data_st_df.empty:
-                current_price = float(data_st_df["close"].iloc[-1])
-                # Estimate ATR from recent data
-                high_low = data_st_df["high"] - data_st_df["low"]
-                atr_estimate = float(high_low.tail(14).mean())
                 
-            if features_st_data:
-                volatility = features_st_data.returns_vol
-            
-            price_context = ""
-            if current_price and atr_estimate:
+                ccm_data = ccm_st.notes if ccm_st else "No cross-asset data available"
+                
+                contra_data = "\n".join(contradictor_st.contradictions) if contradictor_st and contradictor_st.contradictions else "No contradictions found"
+                
+                # Get current price and volatility for TP/SL calculations
+                features_st_data = state.get("features_st")
+                data_st_df = state.get("data_st")
+                
+                current_price = None
+                atr_estimate = None
+                volatility = None
+                
+                if data_st_df is not None and not data_st_df.empty:
+                    current_price = float(data_st_df["close"].iloc[-1])
+                    # Estimate ATR from recent data
+                    high_low = data_st_df["high"] - data_st_df["low"]
+                    atr_estimate = float(high_low.tail(14).mean())
+                
+                if features_st_data:
+                    volatility = features_st_data.returns_vol
+                
+                # Format volatility string
                 vol_str = f"{volatility:.2%}" if volatility else "N/A"
-                price_context = f"""
+                
+                price_context = ""
+                if current_price and atr_estimate:
+                    price_context = f"""
 **Current Market Data:**
 - Current Price: ${current_price:.2f}
 - Average True Range (14-period): ${atr_estimate:.2f}
 - Daily Volatility: {vol_str}
 """
-            
-            # Enhanced prompt with parameter optimization recommendations
-            system_prompt = """You are a senior quantitative trader and algo developer specializing in regime-adaptive strategies.
+                
+                # Enhanced prompt with parameter optimization recommendations
+                system_prompt = """You are a senior quantitative trader and algo developer specializing in regime-adaptive strategies.
 
 Your analysis MUST include:
 1. Market narrative (regime interpretation)
@@ -233,11 +293,11 @@ Example: "Given strong trend (H=0.70), reduce fast MA from 10→8 for faster ent
 
 Be specific with numbers and rationale."""
 
-            # Format price and ATR safely
-            price_str = f"${current_price:.2f}" if current_price else "N/A"
-            atr_str = f"${atr_estimate:.2f}" if atr_estimate else "N/A"
-            
-            user_prompt = f"""Analyze this {symbol} market regime analysis and provide ACTIONABLE trading recommendations:
+                # Format price and ATR safely
+                price_str = f"${current_price:.2f}" if current_price else "N/A"
+                atr_str = f"${atr_estimate:.2f}" if atr_estimate else "N/A"
+                
+                user_prompt = f"""Analyze this {symbol} market regime analysis and provide ACTIONABLE trading recommendations:
 
 {regime_data}
 
@@ -288,26 +348,27 @@ Example format:
 ### 5. Bottom Line
 Trade or stay flat? One sentence recommendation."""
 
-            llm_summary = llm_client.generate(
-                prompt=user_prompt,
-                system_prompt=system_prompt,
-                max_tokens=800,  # Increased for detailed TP/SL recommendations
-                temperature=0.6,
-            )
-            
-            if llm_summary:
-                summary_lines.extend([
-                    "---",
-                    "",
-                    "## 🤖 AI-Enhanced Market Intelligence",
-                    "",
-                    llm_summary,
-                    "",
-                ])
-        except Exception as e:
-            logger.warning(f"LLM summary generation failed: {e}")
-    else:
-        logger.debug("LLM not enabled, using template-based summary")
+                # Use Perplexity with web search for better recommendations
+                llm_summary = llm_client.generate(
+                    prompt=user_prompt,
+                    system_prompt=system_prompt,
+                    max_tokens=800,
+                    temperature=0.6,
+                )
+                
+                if llm_summary:
+                    summary_lines.extend([
+                        "---",
+                        "",
+                        "## 🤖 AI-Enhanced Trading Recommendations",
+                        "",
+                        llm_summary,
+                        "",
+                    ])
+            except Exception as e:
+                logger.warning(f"LLM trading recommendations failed: {e}")
+        else:
+            logger.debug("LLM not enabled for trading recommendations")
 
     # Strategy comparison table (if multiple strategies tested on MT)
     # (already retrieved above for LLM)
@@ -606,7 +667,7 @@ Trade or stay flat? One sentence recommendation."""
             summary_lines.append("")
         if regime_lt:
             summary_lines.append(f"**LT:** {regime_lt.rationale}")
-            summary_lines.append("")
+    summary_lines.append("")
 
     # Fusion logic
     summary_lines.extend([
@@ -725,8 +786,8 @@ Trade or stay flat? One sentence recommendation."""
                 summary_lines.append(
                     f"- {status} **{node_name}**: {format_duration(duration)} ({percent:.1f}%)"
                 )
-            summary_lines.append("")
-    
+    summary_lines.append("")
+
     # Artifacts
     summary_lines.extend([
         "## Artifacts",

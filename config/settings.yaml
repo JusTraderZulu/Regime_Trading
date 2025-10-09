@@ -34,8 +34,9 @@ tests:
   adf_maxlag: null  # auto-select
 
 # CCM (Cross-Asset Context) Agent configuration
+# DISABLED: Data access issues with ETH-USD, SOL-USD, DXY, VIX
 ccm:
-  enabled: true
+  enabled: false  # Disabled - insufficient data access
   tiers: ["LT", "MT", "ST"]
   
   # Context symbols for cross-asset analysis
