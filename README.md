@@ -20,7 +20,7 @@ This system analyzes crypto markets across three timeframes (LT/MT/ST) using sta
 - 🎯 **Multi-Strategy Testing**: 9 strategies tested per regime, best auto-selected
 - 📈 **Comprehensive Backtesting**: 40+ institutional metrics (VaR, CVaR, Ulcer, Information Ratio)
 - 📊 **Baseline Comparison**: vs Buy-and-Hold with Alpha calculation
-- 🤖 **AI-Powered Insights**: OpenAI generates parameter optimization + TP/SL recommendations
+- 🤖 **AI-Powered Insights**: Perplexity AI (internet-connected) for market intelligence + parameter optimization + TP/SL recommendations
 - 📄 **Professional Reports**: Markdown + PDF + JSON with narrative flow
 - 💻 **Interfaces**: CLI + Telegram bot + INDEX.md navigation
 - ✅ **Schema-Driven**: Full Pydantic validation for every agent
@@ -128,6 +128,25 @@ python -m src.ui.cli run --symbol X:BTCUSD --mode fast
 
 ## 🚀 Usage
 
+### ⚡ Quick Start (Recommended)
+
+**Use the simple script:**
+
+```bash
+# Fast mode - Market intelligence only
+./analyze.sh X:BTCUSD fast
+
+# Thorough mode - Full trading analysis
+./analyze.sh X:ETHUSD thorough
+
+# With PDF and charts
+./analyze.sh X:SOLUSD thorough --pdf --save-charts
+```
+
+The script automatically loads API keys and shows where results are saved!
+
+---
+
 ### CLI Interface
 
 #### Quick Analysis (Fast Mode)
@@ -192,10 +211,10 @@ make telegram
 
 ## 📁 Output Structure
 
-All outputs saved to `artifacts/{symbol}/{date}/`:
+All outputs saved to `artifacts/{symbol}/{date}/{time}/` (EST timezone):
 
 ```
-artifacts/BTC-USD/2024-01-15/
+artifacts/X:BTCUSD/2025-10-09/10-19-28/  ← Date + Time (EST)
 ├── report.md                    # Executive summary
 ├── features_lt.json             # LT features
 ├── features_mt.json             # MT features
@@ -358,43 +377,57 @@ This implementation follows two reference specifications:
 ```
 agentic-crypto/
 ├── README.md                    # This file
+├── analyze.sh                  # Quick run script ⭐ NEW
+├── QUICK_START.md              # Easy usage guide ⭐ NEW
 ├── pyproject.toml              # Package configuration
 ├── requirements.txt            # Pinned dependencies
 ├── Makefile                    # Build automation
 ├── .python-version             # Python version (3.11.9)
-├── .env.example                # Environment template
 ├── config/
-│   └── settings.yaml           # System configuration
+│   └── settings.yaml           # System configuration (enhanced)
 ├── src/
 │   ├── core/
-│   │   ├── schemas.py          # Pydantic models
+│   │   ├── schemas.py          # Pydantic models (enhanced)
 │   │   ├── state.py            # LangGraph state
-│   │   └── utils.py            # Config, logging, helpers
+│   │   ├── utils.py            # Config, logging, helpers
+│   │   ├── llm.py              # OpenAI client
+│   │   ├── market_intelligence.py  # Perplexity AI ⭐ NEW
+│   │   └── progress.py         # Progress tracking ⭐ NEW
 │   ├── tools/
 │   │   ├── data_loaders.py     # Polygon.io data
-│   │   ├── features.py         # Hurst, VR, ADF
-│   │   ├── ccm.py              # Cross-asset context
-│   │   ├── stats_tests.py      # Statistical tests
-│   │   └── backtest.py         # Strategy backtesting
+│   │   ├── features.py         # Enhanced features
+│   │   ├── stats_tests.py      # Basic statistical tests
+│   │   ├── backtest.py         # Strategy backtesting
+│   │   └── metrics.py          # 40+ metrics ⭐ NEW
+│   ├── analytics/              # ⭐ NEW MODULE
+│   │   ├── stat_tests.py       # Enhanced stats (VR multi, half-life, ARCH-LM)
+│   │   ├── regime_fusion.py    # Transparent fusion math
+│   │   └── markov.py           # Transition matrices
+│   ├── viz/                    # ⭐ NEW MODULE
+│   │   └── plots.py            # Visualizations
 │   ├── agents/
 │   │   ├── graph.py            # LangGraph pipeline
 │   │   ├── orchestrator.py     # Data, features, regime
-│   │   ├── ccm_agent.py        # CCM computation
 │   │   ├── contradictor.py     # Red-team agent
 │   │   ├── judge.py            # Validation agent
-│   │   └── summarizer.py       # Report generation
+│   │   └── summarizer.py       # Report generation (enhanced)
 │   ├── reporters/
-│   │   └── executive_report.py # Markdown writer
+│   │   ├── executive_report.py # Markdown writer
+│   │   ├── pdf_report.py       # PDF generation ⭐ NEW
+│   │   └── index_generator.py  # INDEX.md creator ⭐ NEW
 │   ├── executors/
 │   │   └── telegram_bot.py     # Telegram interface
 │   └── ui/
-│       └── cli.py              # Command-line interface
+│       └── cli.py              # Command-line interface (enhanced flags)
 ├── tests/
 │   ├── test_hurst.py           # Hurst exponent tests
 │   ├── test_variance_ratio.py  # VR test validation
-│   └── test_graph_happy_path.py # Integration tests
+│   ├── test_graph_happy_path.py # Integration tests
+│   ├── test_stat_tests_enhanced.py  # Enhanced stats ⭐ NEW
+│   ├── test_regime_fusion_enhanced.py  # Fusion tests ⭐ NEW
+│   └── test_markov_enhanced.py # Markov tests ⭐ NEW
 ├── notebooks/                   # Research notebooks
-├── artifacts/                   # Output directory
+├── artifacts/                   # Output: {symbol}/{date}/{time}/ ⭐ UPDATED
 └── data/                       # Cached market data
 ```
 
@@ -493,7 +526,14 @@ Free to use for educational purposes. For commercial use, please contact the aut
 
 **Built with**: Python 3.11, LangGraph, Pandas, NumPy, Pydantic, Polygon.io, OpenAI
 
-**Status**: Phase 1 Complete ✅ | Production-Ready 🚀
+**Recent Updates:**
+- ✅ Enhanced analytics (10+ statistical methods)
+- ✅ Perplexity AI integration (internet-connected intelligence)
+- ✅ EST timezone with time-based folders
+- ✅ Multi-lag VR, half-life, ARCH-LM tests
+- ✅ 22 passing tests
+
+**Status**: Phase 1 Complete ✅ + Major Enhancements | Production-Ready 🚀
 
 **Repository:** https://github.com/JusTraderZulu/Regime_Trading.git
 
