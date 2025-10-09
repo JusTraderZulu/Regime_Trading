@@ -108,15 +108,52 @@ regime:
     adf: 0.15        # 15% - stationarity check
     volatility: 0.05 # 5% - market condition
 
+# Enhanced Tier Configuration
+tiers:
+  weights:
+    LT: 0.30  # Long-term weight in fusion
+    MT: 0.50  # Medium-term weight (primary)
+    ST: 0.20  # Short-term weight
+  windows:
+    hurst_rolling: 100   # Window for rolling Hurst
+    hurst_step: 20       # Step size for rolling calcs
+    vr_lags: [2, 4, 8]   # Multiple lags for VR test
+
 # Contradictor Agent settings
 contradictor:
   enabled: true
+  penalty_per_flag: 0.10  # Penalty per contradiction (transparent)
+  alpha_vr: 0.05          # Significance level for VR
+  alpha_alt: 0.05         # Significance for alternate tests
   alternate_bars:
     "15m": "1h"
     "1h": "15m"
     "4h": "1d"
     "1d": "4h"
   borderline_threshold: 0.10  # p-value closeness to alpha
+
+# Regime Transition Analysis
+transition:
+  lookback_bars: 1000  # Bars for empirical transition matrix
+
+# Volatility Clustering
+volatility:
+  arch_lm_lags: 5  # Lags for ARCH-LM test
+
+# Report Generation
+report:
+  show_charts: true       # Generate visualizations
+  save_charts: true       # Save to charts/ directory
+  chart_width: 900        # pixels
+  chart_height: 320       # pixels
+  sandbox_web_summary: true  # Label Perplexity as "Non-Model"
+
+# Risk Management
+risk:
+  confidence_bands: [0.50, 0.75]  # Map to position sizing
+  # <50%: stay flat or 25% position
+  # 50-75%: 50% position
+  # >75%: full position
 
 # Telegram bot configuration
 telegram:

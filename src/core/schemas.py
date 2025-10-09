@@ -59,6 +59,15 @@ class FeatureBundle(BaseModel):
     vr_statistic: float = Field(description="Variance ratio test statistic")
     vr_p_value: float = Field(ge=0.0, le=1.0, description="VR test p-value")
     vr_detail: Dict[int, float] = Field(description="VR per lag")
+    
+    # Enhanced analytics (optional - new)
+    vr_multi: Optional[List[Dict]] = Field(default=None, description="Multi-lag VR results")
+    half_life: Optional[float] = Field(default=None, description="AR(1) mean reversion half-life")
+    arch_lm_stat: Optional[float] = Field(default=None, description="ARCH-LM test statistic")
+    arch_lm_p: Optional[float] = Field(default=None, description="ARCH-LM p-value")
+    rolling_hurst_mean: Optional[float] = Field(default=None, description="Mean of rolling Hurst")
+    rolling_hurst_std: Optional[float] = Field(default=None, description="Std of rolling Hurst")
+    skew_kurt_stability: Optional[float] = Field(default=None, description="Distribution stability index")
 
     # ADF stationarity test
     adf_statistic: float

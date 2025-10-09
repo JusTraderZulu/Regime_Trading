@@ -142,6 +142,28 @@ Examples:
         action="store_true",
         help="Generate PDF report in addition to markdown",
     )
+    run_parser.add_argument(
+        "--show-charts",
+        action="store_true",
+        help="Generate visualization charts (rolling Hurst, VR, regime timeline)",
+    )
+    run_parser.add_argument(
+        "--save-charts",
+        action="store_true",
+        help="Save charts to artifacts/charts/ directory",
+    )
+    run_parser.add_argument(
+        "--transition-lookback",
+        type=int,
+        default=None,
+        help="Lookback bars for transition matrix (default from config)",
+    )
+    run_parser.add_argument(
+        "--vr-lags",
+        type=str,
+        default=None,
+        help="Comma-separated VR lags (e.g., '2,4,8')",
+    )
 
     args = parser.parse_args()
 

@@ -604,8 +604,29 @@ Trade or stay flat? One sentence recommendation."""
             f"- **Returns Vol:** {features_st.returns_vol:.4f}",
             f"- **Returns Skew:** {features_st.returns_skew:.4f}",
             f"- **Returns Kurt:** {features_st.returns_kurt:.4f}",
-            "",
         ])
+        
+        # Enhanced analytics (new)
+        if features_st.half_life is not None:
+            hl_str = f"{features_st.half_life:.2f} bars" if features_st.half_life < 100 else "∞ (no mean reversion)"
+            summary_lines.append(f"- **Half-Life (AR1):** {hl_str}")
+        
+        if features_st.vr_multi:
+            summary_lines.append(f"- **VR Multi-Lag:** {len(features_st.vr_multi)} lags tested")
+            for vr_item in features_st.vr_multi:
+                summary_lines.append(f"  - q={vr_item['q']}: VR={vr_item['vr']:.3f}, p={vr_item['p']:.3f}")
+        
+        if features_st.arch_lm_p is not None:
+            clustering = "Yes" if features_st.arch_lm_p < 0.05 else "No"
+            summary_lines.append(f"- **Vol Clustering (ARCH-LM):** {clustering} (p={features_st.arch_lm_p:.3f})")
+        
+        if features_st.rolling_hurst_mean is not None:
+            summary_lines.append(f"- **Rolling Hurst:** μ={features_st.rolling_hurst_mean:.3f}, σ={features_st.rolling_hurst_std:.3f}")
+        
+        if features_st.skew_kurt_stability is not None:
+            summary_lines.append(f"- **Distribution Stability:** {features_st.skew_kurt_stability:.3f}")
+        
+        summary_lines.append("")
     
     if features_mt:
         summary_lines.extend([

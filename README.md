@@ -13,7 +13,7 @@ This system analyzes crypto markets across three timeframes (LT/MT/ST) using sta
 ### Key Features
 
 - ✅ **Multi-Timeframe Analysis**: Long-term (1D), Medium-term (4H), Short-term (15m)
-- 📊 **5 Statistical Methods**: Hurst (R/S & DFA with CI), Variance Ratio, ADF, Autocorrelation, Robust estimators
+- 📊 **10+ Statistical Methods**: Hurst (R/S & DFA with CI), Multi-lag VR, ADF, Autocorrelation, Half-life, ARCH-LM, Rolling stats, Distribution stability
 - 🧠 **Weighted Voting System**: Consensus from multiple statistical signals (not single method)
 - 🌐 **Cross-Asset Context (CCM)**: Nonlinear coupling with ETH, SOL, SPY, DXY, VIX
 - 🤖 **Agentic Pipeline**: LangGraph orchestration with Judge + Contradictor validation

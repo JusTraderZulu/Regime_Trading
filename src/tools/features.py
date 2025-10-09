@@ -494,6 +494,56 @@ def compute_feature_bundle(
 
     # Volatility stats
     vol_stats = compute_vol_stats(returns_arr)
+    
+    # Enhanced analytics (new - optional for backward compatibility)
+    vr_multi_results = None
+    half_life_val = None
+    arch_lm_result = None
+    rolling_h_mean = None
+    rolling_h_std = None
+    skew_kurt_stab = None
+    
+    try:
+        from src.analytics.stat_tests import (
+            variance_ratio_multi,
+            half_life_ar1,
+            arch_lm_test,
+            rolling_hurst,
+            rolling_skew_kurt,
+            skew_kurt_stability_index,
+        )
+        
+        # Multi-lag VR
+        tier_config = config.get("tiers", {})
+        vr_lags_enhanced = tier_config.get("windows", {}).get("vr_lags", [2, 4, 8])
+        vr_multi_results = variance_ratio_multi(close_series, vr_lags_enhanced)
+        
+        # Half-life
+        half_life_val = half_life_ar1(close_series)
+        
+        # ARCH-LM
+        vol_config = config.get("volatility", {})
+        arch_lags = vol_config.get("arch_lm_lags", 5)
+        arch_lm_result = arch_lm_test(close_series, lags=arch_lags)
+        
+        # Rolling Hurst (if enough data)
+        if n_samples >= 200:
+            hurst_roll_window = tier_config.get("windows", {}).get("hurst_rolling", 100)
+            hurst_roll_step = tier_config.get("windows", {}).get("hurst_step", 20)
+            df_rolling_h = rolling_hurst(close_series, window=hurst_roll_window, step=hurst_roll_step)
+            
+            if not df_rolling_h.empty:
+                rolling_h_mean = float(df_rolling_h["H"].mean())
+                rolling_h_std = float(df_rolling_h["H"].std())
+        
+        # Skew-Kurt stability
+        if n_samples >= 200:
+            df_rolling_sk = rolling_skew_kurt(close_series, window=100, step=20)
+            if not df_rolling_sk.empty:
+                skew_kurt_stab = skew_kurt_stability_index(df_rolling_sk)
+                
+    except Exception as e:
+        logger.warning(f"Enhanced analytics failed (non-critical): {e}")
 
     return FeatureBundle(
         tier=tier,
@@ -522,5 +572,13 @@ def compute_feature_bundle(
         returns_vol=vol_stats["vol"],
         returns_skew=vol_stats["skew"],
         returns_kurt=vol_stats["kurt"],
+        # Enhanced analytics (new)
+        vr_multi=vr_multi_results,
+        half_life=half_life_val,
+        arch_lm_stat=arch_lm_result["LM_stat"] if arch_lm_result else None,
+        arch_lm_p=arch_lm_result["p"] if arch_lm_result else None,
+        rolling_hurst_mean=rolling_h_mean,
+        rolling_hurst_std=rolling_h_std,
+        skew_kurt_stability=skew_kurt_stab,
     )
 
