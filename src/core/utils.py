@@ -45,17 +45,33 @@ def get_env_var(key: str, required: bool = False) -> Optional[str]:
 def create_artifacts_dir(symbol: str, timestamp: Optional[datetime] = None) -> Path:
     """
     Create artifacts directory for a run.
-    Format: artifacts/{symbol}/{YYYY-MM-DD}/
+    Format: artifacts/{symbol}/{YYYY-MM-DD}/{HH-MM-SS}/
+    
+    Uses Eastern Time (EST/EDT) and separate time folders for each run.
     """
+    import pytz
+    
     if timestamp is None:
         timestamp = datetime.utcnow()
-
-    date_str = timestamp.strftime("%Y-%m-%d")
+    
+    # Convert UTC to Eastern Time
+    utc_tz = pytz.UTC
+    eastern_tz = pytz.timezone('US/Eastern')
+    
+    if timestamp.tzinfo is None:
+        timestamp = utc_tz.localize(timestamp)
+    
+    timestamp_est = timestamp.astimezone(eastern_tz)
+    
+    # Format: date folder, then time subfolder
+    date_str = timestamp_est.strftime("%Y-%m-%d")
+    time_str = timestamp_est.strftime("%H-%M-%S")
+    
     artifacts_root = Path(get_env_var("ARTIFACTS_DIR") or "./artifacts")
-    run_dir = artifacts_root / symbol / date_str
+    run_dir = artifacts_root / symbol / date_str / time_str
 
     run_dir.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Created artifacts directory: {run_dir}")
+    logger.info(f"Created artifacts directory: {run_dir} (EST: {timestamp_est.strftime('%Y-%m-%d %H:%M:%S %Z')})")
 
     return run_dir
 

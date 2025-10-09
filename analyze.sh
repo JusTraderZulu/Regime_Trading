@@ -90,12 +90,20 @@ if [ $? -eq 0 ]; then
     echo -e "${GREEN}  ✅ Analysis Complete!${NC}"
     echo -e "${GREEN}========================================${NC}"
     echo ""
-    echo "📁 Results saved to: artifacts/${SYMBOL}/$(date +%Y-%m-%d)/"
-    echo ""
-    echo "Quick commands:"
-    echo "  cat artifacts/${SYMBOL}/$(date +%Y-%m-%d)/INDEX.md       # Quick summary"
-    echo "  cat artifacts/${SYMBOL}/$(date +%Y-%m-%d)/report.md      # Full report"
-    echo "  open artifacts/${SYMBOL}/$(date +%Y-%m-%d)/               # Open directory"
+    
+    # Find latest run directory (with time subfolder)
+    LATEST_DIR=$(ls -td artifacts/${SYMBOL}/$(date +%Y-%m-%d)/*/ 2>/dev/null | head -1)
+    
+    if [ -n "$LATEST_DIR" ]; then
+        echo "📁 Results saved to: ${LATEST_DIR}"
+        echo ""
+        echo "Quick commands:"
+        echo "  cat ${LATEST_DIR}INDEX.md       # Quick summary"
+        echo "  cat ${LATEST_DIR}report.md      # Full report"
+        echo "  open ${LATEST_DIR}               # Open directory"
+    else
+        echo "📁 Results saved to: artifacts/${SYMBOL}/$(date +%Y-%m-%d)/"
+    fi
     echo ""
 else
     echo ""

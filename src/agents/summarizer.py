@@ -71,10 +71,22 @@ def summarizer_node(state: PipelineState) -> dict:
     else:
         primary_strategy_name = "unknown"
 
+    # Convert timestamp to EST for display
+    import pytz
+    utc_tz = pytz.UTC
+    eastern_tz = pytz.timezone('US/Eastern')
+    
+    if timestamp.tzinfo is None:
+        timestamp_utc = utc_tz.localize(timestamp)
+    else:
+        timestamp_utc = timestamp
+    
+    timestamp_est = timestamp_utc.astimezone(eastern_tz)
+    
     # Generate narrative-driven report
     summary_lines = [
         f"# {symbol} Regime Analysis Report",
-        f"**Generated:** {timestamp.strftime('%Y-%m-%d %H:%M UTC')}",
+        f"**Generated:** {timestamp_est.strftime('%Y-%m-%d %H:%M:%S %Z')}",
         f"**Analysis Period:** Last 30 days (ST), 120 days (MT), 730 days (LT)",
         f"**Methodology:** Multi-tier regime detection with weighted voting",
         "",
