@@ -1,0 +1,143 @@
+# Crypto Regime Analysis System Configuration
+
+# Symbols to analyze
+symbols:
+  - BTC-USD
+  - ETH-USD
+
+# Timeframe definitions (tier-based)
+timeframes:
+  LT:  # Long-term / Macro
+    bar: "1d"
+    lookback: 730  # ~2 years
+    min_samples: 300
+  MT:  # Medium-term / Swing
+    bar: "4h"
+    lookback: 120  # ~120 days
+    min_samples: 300
+  ST:  # Short-term / Execution
+    bar: "15m"
+    lookback: 30  # ~30 days
+    min_samples: 300
+
+# Hurst exponent computation settings
+hurst:
+  min_window: 16
+  max_window: 512
+  step: 2
+  method: "both"  # "rs", "dfa", or "both"
+
+# Statistical tests configuration
+tests:
+  variance_ratio_lags: [2, 5, 10]
+  adf_alpha: 0.05
+  adf_maxlag: null  # auto-select
+
+# CCM (Cross-Asset Context) Agent configuration
+ccm:
+  enabled: true
+  tiers: ["LT", "MT", "ST"]
+  
+  # Context symbols for cross-asset analysis
+  context_symbols:
+    - ETH-USD
+    - SOL-USD
+    - SPY      # S&P 500
+    - DXY      # US Dollar Index
+    - VIX      # Volatility Index
+  
+  # CCM computation parameters
+  params:
+    E: 3              # Embedding dimension
+    tau: 1            # Time delay
+    library_frac: 0.8 # Fraction of data for library
+  
+  # Thresholds for regime interpretation
+  thresholds:
+    sector_strong: 0.60   # High crypto-sector coupling
+    macro_low: 0.20       # Low macro coupling = decoupled
+
+# Backtest configuration
+backtest:
+  # Transaction costs (in basis points)
+  costs:
+    spread_bps: 5   # Bid-ask spread
+    slip_bps: 3     # Slippage
+    fee_bps: 2      # Exchange fee
+  
+  # Walk-forward settings
+  train_frac: 0.7
+  min_trades: 10
+  
+  # Strategy templates per regime
+  # Multiple strategies will be tested for each regime
+  # System will select best performing one
+  strategies:
+    trending:
+      - ma_cross
+      - ema_cross
+      - macd
+      - donchian
+    mean_reverting:
+      - bollinger_revert
+      - rsi
+      - keltner
+    random:
+      - carry
+    volatile_trending:
+      - atr_trend
+      - donchian
+
+# Regime classification thresholds
+# Adjusted for crypto market characteristics (more lenient)
+regime:
+  hurst_thresholds:
+    mean_reverting: 0.48  # Adjusted from 0.45 (crypto is noisier)
+    trending: 0.52         # Adjusted from 0.55 (tighter band)
+  vr_thresholds:
+    mean_reverting: 0.97   # Adjusted from 0.95
+    trending: 1.03         # Adjusted from 1.05
+  confidence_min: 0.50
+  
+  # Weighted voting system for regime classification
+  signal_weights:
+    hurst: 0.35      # 35% - primary signal
+    vr: 0.25         # 25% - statistical confirmation
+    acf: 0.20        # 20% - autocorrelation pattern (NEW!)
+    adf: 0.15        # 15% - stationarity check
+    volatility: 0.05 # 5% - market condition
+
+# Contradictor Agent settings
+contradictor:
+  enabled: true
+  alternate_bars:
+    "15m": "1h"
+    "1h": "15m"
+    "4h": "1d"
+    "1d": "4h"
+  borderline_threshold: 0.10  # p-value closeness to alpha
+
+# Telegram bot configuration
+telegram:
+  enabled: true
+  allowed_user_ids:
+    - 123456789  # Replace with your Telegram user ID
+  commands:
+    - analyze
+    - status
+  rate_limit_seconds: 30
+
+# Output configuration
+output:
+  artifacts_dir: "./artifacts"
+  timezone: "UTC"
+  save_plots: true
+  save_csv: true
+  report_format: "markdown"
+
+# Logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/regime_detector.log"
+
