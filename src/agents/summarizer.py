@@ -830,6 +830,26 @@ Trade or stay flat? One sentence recommendation."""
     ])
 
     summary_md = "\n".join(summary_lines)
+    
+    # Add QC comparison if available
+    qc_backtest_result = state.get("qc_backtest_result")
+    qc_backtest_id = state.get("qc_backtest_id")
+    
+    if qc_backtest_result:
+        logger.info("Adding QC Cloud backtest comparison to report")
+        from src.reporters.backtest_comparison import compare_backtests, format_comparison_markdown
+        
+        # Compare with ST backtest (most realistic execution)
+        backtest_st = state.get("backtest_st")
+        comparison = compare_backtests(backtest_st, qc_backtest_result)
+        comparison_md = format_comparison_markdown(comparison)
+        
+        # Append to summary
+        summary_md += "\n\n---\n\n" + comparison_md
+        
+        if qc_backtest_id:
+            qc_project_id = state.get("qc_project_id", "24586010")
+            summary_md += f"\n**QC Backtest**: https://www.quantconnect.com/terminal/{qc_project_id}/{qc_backtest_id}\n"
 
     # Create ExecReport with MT as primary
     exec_report = ExecReport(

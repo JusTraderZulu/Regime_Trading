@@ -1,0 +1,4 @@
+time,symbol,asset_class,venue,regime,side,weight,confidence,mid,spread,pip_value,fee_bps,funding_apr,strategy_name,strategy_params
+2025-10-10T00:00:00Z,EURUSD,FX,Oanda,mean_reverting,0,0.0000,0.4000,1.16,,,,,,
+2025-10-10T20:00:00Z,EURUSD,FX,Oanda,mean_reverting,0,0.0000,0.4000,1.16,,,,,,
+2025-10-10T20:45:00Z,EURUSD,FX,Oanda,trending,1,0.3500,0.3500,1.16,,,,,,

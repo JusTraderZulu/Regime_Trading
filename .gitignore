@@ -5,6 +5,9 @@ polygon_key.txt
 open_ai.txt
 hugging_face.txt
 perp_key.txt
+qc_token.txt
+qc_user.txt
+qc_project_id.txt
 .env
 .env.local
 *.key
@@ -67,6 +70,11 @@ dmypy.json
 # Data (cached market data - can be regenerated)
 data/*/
 !data/.gitkeep
+!data/signals/
+
+# Signals (keep latest for Lean)
+data/signals/*/
+!data/signals/latest/
 
 # Artifacts (analysis outputs - user-generated)
 artifacts/*/

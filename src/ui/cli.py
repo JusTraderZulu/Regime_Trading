@@ -19,7 +19,7 @@ from src.reporters.pdf_report import generate_pdf_from_state
 logger = logging.getLogger(__name__)
 
 
-def run_analysis(symbol: str, mode: str, st_bar: str | None, config: str, pdf: bool = False) -> int:
+def run_analysis(symbol: str, mode: str, st_bar: str | None, config: str, pdf: bool = False, qc_backtest: bool = False) -> int:
     """
     Run analysis pipeline.
 
@@ -29,7 +29,19 @@ def run_analysis(symbol: str, mode: str, st_bar: str | None, config: str, pdf: b
     try:
         logger.info(f"=" * 60)
         logger.info(f"Running analysis: {symbol} (mode={mode})")
+        if qc_backtest:
+            logger.info("QC Cloud backtesting: ENABLED (via --qc-backtest flag)")
         logger.info(f"=" * 60)
+
+        # Enable QC auto-submit if flag is set
+        if qc_backtest:
+            from src.core.utils import load_config
+            config_dict = load_config(config)
+            if not config_dict.get("qc", {}).get("auto_submit"):
+                # Temporarily enable via environment/override
+                # Note: This is a quick hack; proper implementation would pass through state
+                import os
+                os.environ['QC_AUTO_SUBMIT'] = '1'
 
         # Run pipeline
         final_state = run_pipeline(
@@ -65,20 +77,65 @@ def run_analysis(symbol: str, mode: str, st_bar: str | None, config: str, pdf: b
         # Success
         exec_report = final_state.get("exec_report")
         if exec_report:
-            logger.info("=" * 60)
-            logger.info("✅ Analysis complete!")
-            logger.info(f"Symbol: {exec_report.symbol}")
+            logger.info("")
+            logger.info("=" * 70)
+            logger.info("✅ ANALYSIS COMPLETE!")
+            logger.info("=" * 70)
+            logger.info("")
+            logger.info(f"📊 Symbol: {exec_report.symbol}")
+            logger.info(f"🔍 Mode: {mode.upper()} {'(with backtest)' if mode == 'thorough' else '(regime detection only)'}")
+            logger.info(f"⏱️  Time: {final_state.get('timing_summary', {}).get('total_time', 'N/A')}")
+            logger.info("")
+            logger.info("--- Regime & Strategy ---")
             logger.info(f"Primary Tier: {exec_report.primary_tier}")
-            logger.info(f"MT Regime: {exec_report.mt_regime.value} (macro context)")
-            logger.info(f"MT Strategy: {exec_report.mt_strategy} (PRIMARY)")
+            logger.info(f"MT Regime: {exec_report.mt_regime.value}")
+            logger.info(f"MT Strategy: {exec_report.mt_strategy or 'N/A'}")
             logger.info(f"MT Confidence: {exec_report.mt_confidence:.1%}")
             if exec_report.st_regime:
                 logger.info(f"ST Regime: {exec_report.st_regime.value} (monitoring)")
-            logger.info(f"Report: {report_path}")
+            logger.info("")
+            logger.info("--- 📄 REPORTS & OUTPUTS ---")
+            logger.info("")
+            logger.info(f"📍 Main Report:")
+            logger.info(f"   {report_path}")
+            logger.info("")
+            logger.info(f"📂 All Artifacts:")
+            logger.info(f"   {exec_report.artifacts_dir}")
+            logger.info("")
             if pdf_path:
-                logger.info(f"PDF: {pdf_path}")
-            logger.info(f"Artifacts: {exec_report.artifacts_dir}")
-            logger.info("=" * 60)
+                logger.info(f"📄 PDF Report:")
+                logger.info(f"   {pdf_path}")
+                logger.info("")
+            
+            # Add helpful commands
+            logger.info("--- 🎯 Quick Actions ---")
+            logger.info("")
+            logger.info(f"View report in Cursor:")
+            logger.info(f"   Open: {report_path}")
+            logger.info("")
+            logger.info(f"View in terminal:")
+            logger.info(f"   cat {report_path}")
+            logger.info("")
+            logger.info(f"Open in default app (macOS):")
+            logger.info(f"   open {report_path}")
+            logger.info("")
+            
+            # QC info if available
+            qc_backtest_id = final_state.get("qc_backtest_id")
+            qc_submitted = final_state.get("qc_backtest_submitted")
+            qc_project_id = final_state.get("qc_project_id", "24586010")
+            
+            if qc_backtest_id:
+                logger.info(f"☁️  QuantConnect Backtest (COMPLETED):")
+                logger.info(f"   https://www.quantconnect.com/terminal/{qc_project_id}/{qc_backtest_id}")
+                logger.info("")
+            elif qc_submitted:
+                logger.info(f"☁️  QuantConnect Backtest (RUNNING IN BACKGROUND):")
+                logger.info(f"   Check status: https://www.quantconnect.com/terminal/{qc_project_id}")
+                logger.info(f"   ⏳ Results available in 2-5 minutes")
+                logger.info("")
+            
+            logger.info("=" * 70)
             return 0
         else:
             logger.error("❌ No exec report generated")
@@ -164,6 +221,11 @@ Examples:
         default=None,
         help="Comma-separated VR lags (e.g., '2,4,8')",
     )
+    run_parser.add_argument(
+        "--qc-backtest",
+        action="store_true",
+        help="Submit backtest to QuantConnect Cloud after analysis",
+    )
 
     args = parser.parse_args()
 
@@ -181,6 +243,7 @@ Examples:
             st_bar=args.st_bar,
             config=args.config,
             pdf=args.pdf,
+            qc_backtest=args.qc_backtest,
         )
         sys.exit(exit_code)
 

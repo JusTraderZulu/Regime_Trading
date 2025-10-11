@@ -1,0 +1,14 @@
+{
+  "data-folder": "../data",
+  "organization-id": "local",
+  "job-organization-id": "",
+  "api-access-token": "",
+  "job-user-id": "",
+  "job-api-access-token": "",
+  "algorithm-language": "Python",
+  "algorithm-type-name": "RegimeSignalsAlgo",
+  "environment": "backtesting",
+  "messaging-handler": "QuantConnect.Messaging.Messaging",
+  "job-queue-handler": "QuantConnect.Queues.JobQueue",
+  "api-handler": "QuantConnect.Api.Api"
+}

@@ -83,6 +83,14 @@ class PipelineState(TypedDict, total=False):
 
     # === Artifacts ===
     artifacts_dir: Optional[str]
+    
+    # === Signals Export (optional) ===
+    signals_csv_path: Optional[str]
+    
+    # === QuantConnect Integration (optional) ===
+    qc_backtest_result: Optional[Any]  # QCBacktestResult
+    qc_backtest_id: Optional[str]
+    qc_project_id: Optional[str]
 
     # === Config ===
     config: Optional[Dict[str, Any]]

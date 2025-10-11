@@ -12,8 +12,9 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import itertools
 
-from src.core.schemas import BacktestResult, RegimeLabel, StrategySpec, Tier
+from src.core.schemas import BacktestResult, RegimeLabel, StrategySpec, Tier, RegimeDecision
 
 matplotlib.use("Agg")  # Non-interactive backend
 logger = logging.getLogger(__name__)
@@ -234,6 +235,7 @@ def backtest(
     artifacts_dir: Optional[Path] = None,
     tier: Tier = Tier.ST,
     symbol: str = "UNKNOWN",
+    regime_decision: Optional[RegimeDecision] = None,
 ) -> BacktestResult:
     """
     Run backtest for a given strategy.
@@ -245,6 +247,7 @@ def backtest(
         artifacts_dir: Directory to save artifacts
         tier: Market tier
         symbol: Asset symbol
+        regime_decision: The regime decision driving this backtest
 
     Returns:
         BacktestResult with performance metrics
@@ -271,6 +274,19 @@ def backtest(
     df["signal"] = signals
     df = df.dropna(subset=["signal"])
 
+    # Determine position size from confidence
+    position_size = 1.0
+    if regime_decision and "risk" in config:
+        confidence = regime_decision.confidence
+        sizing_map = config["risk"].get("position_sizing", [])
+        if sizing_map:
+            # Find the highest threshold that confidence exceeds
+            current_size = 0.0
+            for item in sorted(sizing_map, key=lambda x: x['threshold']):
+                if confidence >= item['threshold']:
+                    current_size = item['size']
+            position_size = current_size
+
     if len(df) < 10:
         logger.warning("Insufficient data after signal generation")
         return _empty_backtest_result(strategy_spec, tier, symbol)
@@ -279,7 +295,7 @@ def backtest(
     df["returns"] = df["close"].pct_change()
 
     # Position changes (for turnover)
-    df["position"] = df["signal"]
+    df["position"] = df["signal"] * position_size
     df["position_change"] = df["position"].diff().abs()
 
     # Strategy returns (position * returns)
@@ -639,7 +655,7 @@ def test_multiple_strategies(
     symbol: str = "UNKNOWN",
 ) -> Tuple[BacktestResult, Dict[str, BacktestResult]]:
     """
-    Test ALL strategies for a given regime and select the best one.
+    Test multiple strategies with parameter optimization for a given regime.
     
     Args:
         regime: Detected regime
@@ -652,68 +668,76 @@ def test_multiple_strategies(
     Returns:
         (best_result, all_results_dict)
     """
-    logger.info(f"Testing multiple strategies for {regime.value} regime")
+    logger.info(f"Optimizing strategies for {regime.value} regime")
     
-    # Get all strategies for this regime
-    strategy_names = get_strategies_for_regime(regime, config)
+    strategy_specs = get_strategies_for_regime(regime, config)
     
-    if not strategy_names:
+    if not strategy_specs:
         logger.warning(f"No strategies configured for {regime.value}, using carry")
-        strategy_names = ["carry"]
+        strategy_specs = [{"name": "carry", "params": {}}]
     
-    results = {}
-    
-    # Test each strategy
-    for strategy_name in strategy_names:
-        logger.info(f"  Testing {strategy_name}...")
-        
-        # Get default params for strategy
-        params = get_default_params(strategy_name)
-        
-        # Create strategy spec
-        strategy_spec = StrategySpec(
-            name=strategy_name,
-            regime=regime,
-            params=params
-        )
-        
-        try:
-            # Run backtest (without saving artifacts yet)
-            result = backtest(
-                strategy_spec=strategy_spec,
-                df=df,
-                config=config,
-                artifacts_dir=None,  # Don't save yet
-                tier=tier,
-                symbol=symbol,
+    all_results = {}
+    best_overall_result = None
+
+    for spec in strategy_specs:
+        strategy_name = spec["name"]
+        param_grid = spec["params"]
+        logger.info(f"  Testing {strategy_name} with param grid...")
+
+        # Generate all combinations of parameters
+        keys, values = zip(*param_grid.items())
+        param_combinations = [dict(zip(keys, v)) for v in itertools.product(*values)]
+
+        best_strategy_result = None
+
+        for params in param_combinations:
+            strategy_spec = StrategySpec(
+                name=strategy_name,
+                regime=regime,
+                params=params
             )
-            results[strategy_name] = result
-            logger.info(f"    {strategy_name}: Sharpe={result.sharpe:.2f}, MaxDD={result.max_drawdown:.1%}")
             
-        except Exception as e:
-            logger.error(f"    {strategy_name} failed: {e}")
-            continue
-    
-    if not results:
+            try:
+                result = backtest(
+                    strategy_spec=strategy_spec,
+                    df=df,
+                    config=config,
+                    artifacts_dir=None,  # No artifacts during optimization
+                    tier=tier,
+                    symbol=symbol,
+                )
+                
+                param_str = ", ".join(f"{k}={v}" for k, v in params.items())
+                logger.debug(f"    {strategy_name}({param_str}): Sharpe={result.sharpe:.2f}")
+
+                if best_strategy_result is None or result.sharpe > best_strategy_result.sharpe:
+                    best_strategy_result = result
+
+            except Exception as e:
+                logger.error(f"    Backtest failed for {strategy_name} with params {params}: {e}")
+                continue
+        
+        if best_strategy_result:
+            all_results[strategy_name] = best_strategy_result
+            if best_overall_result is None or best_strategy_result.sharpe > best_overall_result.sharpe:
+                best_overall_result = best_strategy_result
+            
+            best_params_str = ", ".join(f"{k}={v}" for k, v in best_strategy_result.strategy.params.items())
+            logger.info(f"  ✓ Best for {strategy_name}: Sharpe={best_strategy_result.sharpe:.2f} with params ({best_params_str})")
+
+    if not best_overall_result:
         logger.error("All strategies failed, using carry as fallback")
         carry_spec = StrategySpec(name="carry", regime=regime, params={})
-        return backtest(carry_spec, df, config, artifacts_dir, tier, symbol), {}
+        best_overall_result, all_results = backtest(carry_spec, df, config, artifacts_dir, tier, symbol), {}
+        return best_overall_result, all_results
     
-    # Select best strategy by Sharpe ratio
-    best_name = max(results.keys(), key=lambda k: results[k].sharpe)
-    best_result = results[best_name]
+    best_name = best_overall_result.strategy.name
+    logger.info(f"✓ Best overall strategy: {best_name} (Sharpe={best_overall_result.sharpe:.2f})")
     
-    logger.info(f"✓ Best strategy: {best_name} (Sharpe={best_result.sharpe:.2f})")
-    
-    # Re-run best strategy with artifacts saving
+    # Re-run best strategy to save artifacts
     if artifacts_dir:
-        best_spec = StrategySpec(
-            name=best_name,
-            regime=regime,
-            params=get_default_params(best_name)
-        )
-        best_result = backtest(
-            strategy_spec=best_spec,
+        best_overall_result = backtest(
+            strategy_spec=best_overall_result.strategy,
             df=df,
             config=config,
             artifacts_dir=artifacts_dir,
@@ -721,68 +745,110 @@ def test_multiple_strategies(
             symbol=symbol,
         )
     
-    return best_result, results
+    return best_overall_result, all_results
 
 
 def get_strategies_for_regime(regime: RegimeLabel, config: Dict) -> list:
-    """Get list of strategy names for a regime from config"""
+    """Get list of strategy specifications for a regime from config"""
     config_strategies = config.get("backtest", {}).get("strategies", {})
-    return config_strategies.get(regime.value, [])
-
-
-def get_default_params(strategy_name: str) -> Dict:
-    """Get default parameters for a strategy"""
-    defaults = {
-        "ma_cross": {"fast": 10, "slow": 30},
-        "ema_cross": {"fast": 8, "slow": 21},
-        "macd": {"fast": 12, "slow": 26, "signal": 9},
-        "donchian": {"lookback": 20},
-        "bollinger_revert": {"window": 20, "num_std": 2.0},
-        "rsi": {"period": 14, "oversold": 30, "overbought": 70},
-        "keltner": {"period": 20, "atr_mult": 2.0},
-        "atr_trend": {"ma_period": 20, "atr_period": 14, "atr_mult": 2.0},
-        "carry": {},
-    }
-    return defaults.get(strategy_name, {})
+    return config_strategies.get(regime.value.lower(), [])
 
 
 # ============================================================================
-# Strategy Selection
+# Walk-Forward Analysis
 # ============================================================================
 
 
-def select_strategy_for_regime(regime: RegimeLabel, config: Dict) -> StrategySpec:
+def walk_forward_analysis(
+    regime: RegimeLabel,
+    df: pd.DataFrame,
+    config: Dict,
+    artifacts_dir: Optional[Path] = None,
+    tier: Tier = Tier.ST,
+    symbol: str = "UNKNOWN",
+) -> Optional[BacktestResult]:
     """
-    Select strategy based on regime classification.
+    Perform walk-forward analysis for a given regime.
 
     Args:
         regime: Detected regime
-        config: Config dict with strategy mappings
+        df: Price data
+        config: Config dict
+        artifacts_dir: Artifacts directory
+        tier: Market tier
+        symbol: Asset symbol
 
     Returns:
-        StrategySpec
+        Aggregated backtest result from out-of-sample periods.
     """
-    # Default strategy mappings
-    strategy_map = {
-        RegimeLabel.TRENDING: ("ma_cross", {"fast": 10, "slow": 30}),
-        RegimeLabel.MEAN_REVERTING: ("bollinger_revert", {"window": 20, "num_std": 2.0}),
-        RegimeLabel.RANDOM: ("carry", {}),
-        RegimeLabel.VOLATILE_TRENDING: ("donchian", {"lookback": 20}),
-        RegimeLabel.UNCERTAIN: ("carry", {}),
-    }
+    logger.info(f"Starting walk-forward analysis for {regime.value} regime")
 
-    # Override from config if available
-    config_strategies = config.get("backtest", {}).get("strategies", {})
-    if regime.value in config_strategies:
-        strategy_names = config_strategies[regime.value]
-        if strategy_names:
-            # Pick first strategy for now
-            strategy_name = strategy_names[0]
-            params = {}  # Could extend config to include params
-        else:
-            strategy_name, params = strategy_map.get(regime, ("carry", {}))
-    else:
-        strategy_name, params = strategy_map.get(regime, ("carry", {}))
+    wf_config = config.get("backtest", {}).get("walk_forward", {})
+    train_frac = wf_config.get("train_frac", 0.7)
+    test_frac = 1 - train_frac
+    min_data_points = wf_config.get("min_data_points", 100)
+    step_size_frac = wf_config.get("step_size_frac", 0.2)  # Step forward 20% of test size
 
-    return StrategySpec(name=strategy_name, regime=regime, params=params)
+    if len(df) < min_data_points:
+        logger.warning("Insufficient data for walk-forward analysis")
+        return None
+
+    total_len = len(df)
+    train_len = int(total_len * train_frac)
+    test_len = total_len - train_len
+    step_size = int(test_len * step_size_frac)
+    if step_size < 1:
+        step_size = 1
+
+    out_of_sample_results = []
+    start = 0
+
+    while start + train_len + test_len <= total_len:
+        end_train = start + train_len
+        end_test = end_train + test_len
+
+        df_train = df.iloc[start:end_train]
+        df_test = df.iloc[end_train:end_test]
+
+        logger.info(f"  Training on {df_train.index[0]} to {df_train.index[-1]}")
+        
+        # Find best strategy on training data
+        best_result_train, _ = test_multiple_strategies(
+            regime=regime,
+            df=df_train,
+            config=config,
+            tier=tier,
+            symbol=symbol,
+        )
+
+        if not best_result_train or best_result_train.n_trades == 0:
+            logger.warning("    No viable strategy found in training period.")
+            start += step_size
+            continue
+
+        best_strategy_spec = best_result_train.strategy
+        logger.info(f"    Best strategy: {best_strategy_spec.name} with params {best_strategy_spec.params}")
+        logger.info(f"  Testing on {df_test.index[0]} to {df_test.index[-1]}")
+
+        # Apply best strategy to test data
+        oos_result = backtest(
+            strategy_spec=best_strategy_spec,
+            df=df_test,
+            config=config,
+            tier=tier,
+            symbol=symbol,
+        )
+        out_of_sample_results.append(oos_result)
+
+        start += step_size
+
+    if not out_of_sample_results:
+        logger.error("Walk-forward analysis produced no out-of-sample results.")
+        return None
+
+    # Aggregate results
+    # For now, let's just return the last OOS result as a placeholder for aggregation logic
+    # TODO: Implement proper aggregation of OOS results
+    logger.info("Walk-forward analysis complete.")
+    return out_of_sample_results[-1]
 

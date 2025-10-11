@@ -2,8 +2,18 @@
 
 # Symbols to analyze
 symbols:
+  # Crypto
   - BTC-USD
   - ETH-USD
+  - SOL-USD
+  - XRP-USD
+  
+  # Forex (for validation with longer history)
+  - EUR-USD
+  - GBP-USD
+  - USD-JPY
+  - AUD-USD
+  - USD-CAD
 
 # Timeframe definitions (tier-based)
 timeframes:
@@ -75,19 +85,48 @@ backtest:
   # System will select best performing one
   strategies:
     trending:
-      - ma_cross
-      - ema_cross
-      - macd
-      - donchian
+      - name: ma_cross
+        params:
+          fast: [10, 20]
+          slow: [30, 50]
+      - name: ema_cross
+        params:
+          fast: [8, 12]
+          slow: [21, 26]
+      - name: macd
+        params:
+          fast: [12]
+          slow: [26]
+          signal: [9]
+      - name: donchian
+        params:
+          lookback: [20, 40]
     mean_reverting:
-      - bollinger_revert
-      - rsi
-      - keltner
+      - name: bollinger_revert
+        params:
+          window: [20]
+          num_std: [2.0, 2.5]
+      - name: rsi
+        params:
+          period: [14]
+          oversold: [20, 30]
+          overbought: [70, 80]
+      - name: keltner
+        params:
+          period: [20]
+          atr_mult: [2.0]
     random:
-      - carry
+      - name: carry
+        params: {}
     volatile_trending:
-      - atr_trend
-      - donchian
+      - name: atr_trend
+        params:
+          ma_period: [20]
+          atr_period: [14]
+          atr_mult: [2.0]
+      - name: donchian
+        params:
+          lookback: [20, 30]
 
 # Regime classification thresholds
 # Adjusted for crypto market characteristics (more lenient)
@@ -178,4 +217,14 @@ logging:
   level: "INFO"
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   file: "logs/regime_detector.log"
+
+# QuantConnect Integration (optional)
+lean:
+  export_signals: true  # Enable to write signals.csv for Lean consumption
+  signals_dir: "data/signals"
+
+qc:
+  auto_submit: true  # Enable to automatically submit backtests to QC Cloud
+  wait_for_results: false  # Set to true to wait (adds 5-10 min), false to run in background
+  timeout_seconds: 300  # Max wait time if wait_for_results = true
 

@@ -1,0 +1,41 @@
+# ACME Capital - Company-Specific Configuration
+
+company:
+  name: "ACME Capital"
+  risk_free_rate_annual: 0.05  # 5% annual risk-free rate (US Treasury)
+
+# ACME's minimum requirements for strategy acceptance
+requirements:
+  min_backtest_years: 10       # Must have at least 10 years of backtest data
+  min_cagr: 0.25              # Minimum 25% CAGR
+  min_sharpe_excess: 1.0      # Sharpe ratio must exceed 1.0 (above RF)
+  max_drawdown: 0.20          # Maximum 20% drawdown allowed
+  min_avg_profit_per_trade: 0.0075  # Minimum 0.75% average profit per trade
+
+# ACME's trading universe
+universe:
+  fx:
+    - EURUSD
+    - GBPUSD
+    - USDJPY
+  crypto:
+    - BTCUSD
+    - ETHUSD
+  resolution: "Hour"  # Hourly data for regime detection
+  start: "2015-01-01"
+  end: "2025-01-01"
+
+# ACME's risk management parameters
+execution:
+  portfolio_target_vol: 0.12  # Target 12% annual volatility
+  dd_circuit_1: 0.12          # Scale down 50% at 12% DD
+  dd_circuit_2: 0.18          # Stop all trading at 18% DD
+  max_leverage: 2.5           # Maximum 2.5x leverage
+  position_limit_pct: 0.30    # No single position > 30% of portfolio
+
+# Live trading configuration (disabled for backtesting)
+live:
+  use_https_signals: false
+  signals_url: ""
+  update_frequency_seconds: 3600
+

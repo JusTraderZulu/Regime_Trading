@@ -1,0 +1,84 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "1. Run Pipeline & Export Signals",
+      "type": "shell",
+      "command": "source .venv/bin/activate && python -m src.ui.cli run --symbol X:BTCUSD --mode thorough",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "2. Lean Backtest (Latest Signals)",
+      "type": "shell",
+      "command": "source .venv/bin/activate && cd lean && lean backtest \"RegimeSignalsAlgo\"",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": [],
+      "dependsOn": []
+    },
+    {
+      "label": "3. Evaluate Gates (ACME)",
+      "type": "shell",
+      "command": "source .venv/bin/activate && python -m src.gates.evaluate_backtest --company config/company.acme.yaml --backtest $(ls -dt lean/backtests/*/backtest.json 2>/dev/null | head -n1)",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "4. Full Workflow (Pipeline → Lean → Gates)",
+      "type": "shell",
+      "command": "bash scripts/run_full_workflow.sh acme",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Setup: Create Signals Symlink",
+      "type": "shell",
+      "command": "source .venv/bin/activate && python -c \"from src.bridges.lean_gateway import ensure_lean_data_symlink; from pathlib import Path; ensure_lean_data_symlink(Path('data/signals/latest'))\"",
+      "group": "none",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Test: Run Unit Tests",
+      "type": "shell",
+      "command": "source .venv/bin/activate && pytest tests/ -v",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Test: Validate Signal Export",
+      "type": "shell",
+      "command": "source .venv/bin/activate && python -c \"from src.bridges.signals_writer import read_signals_csv; from pathlib import Path; signals = read_signals_csv(Path('data/signals/latest/signals.csv')); print(f'✓ Found {len(signals)} signals')\"",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
+

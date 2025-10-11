@@ -23,8 +23,9 @@ from src.agents.orchestrator import (
     backtest_node,
     compute_features_node,
     detect_regime_node,
+    export_signals_node,
     load_data_node,
-    select_strategy_node,
+    qc_backtest_node,
     setup_artifacts_node,
 )
 from src.agents.summarizer import summarizer_node
@@ -65,8 +66,9 @@ def build_pipeline_graph() -> StateGraph:
     workflow.add_node("compute_features", compute_features_node)
     workflow.add_node("ccm_agent", ccm_agent_node)
     workflow.add_node("detect_regime", detect_regime_node)
-    workflow.add_node("select_strategy", select_strategy_node)
+    workflow.add_node("export_signals", export_signals_node)  # Optional Lean integration
     workflow.add_node("backtest", backtest_node)
+    workflow.add_node("qc_backtest", qc_backtest_node)  # Optional QC Cloud integration
     workflow.add_node("contradictor", contradictor_node)
     workflow.add_node("judge", judge_node)
     workflow.add_node("summarizer", summarizer_node)
@@ -78,9 +80,10 @@ def build_pipeline_graph() -> StateGraph:
     workflow.add_edge("load_data", "compute_features")
     workflow.add_edge("compute_features", "ccm_agent")
     workflow.add_edge("ccm_agent", "detect_regime")
-    workflow.add_edge("detect_regime", "select_strategy")
-    workflow.add_edge("select_strategy", "backtest")
-    workflow.add_edge("backtest", "contradictor")
+    workflow.add_edge("detect_regime", "backtest")  # Backtest FIRST to get strategy
+    workflow.add_edge("backtest", "export_signals")  # Then export with strategy info
+    workflow.add_edge("export_signals", "qc_backtest")  # QC Cloud validation (optional, no-op if disabled)
+    workflow.add_edge("qc_backtest", "contradictor")
     workflow.add_edge("contradictor", "judge")
     workflow.add_edge("judge", "summarizer")
     workflow.add_edge("summarizer", END)

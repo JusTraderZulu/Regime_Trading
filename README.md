@@ -1,8 +1,12 @@
 # Crypto Regime Analysis System
 
-**Modular, Agentic, Multi-Timeframe Market Intelligence**
+**Modular, Agentic, Multi-Timeframe Market Intelligence with Cloud Validation**
 
 A production-ready system for detecting market regimes, recommending strategies, and generating explainable reports for crypto assets. Built with deterministic Python tools orchestrated by LangGraph agents.
+
+> **🚀 NEW USER? START HERE**: **[START_HERE.md](START_HERE.md)** ← Complete getting started guide  
+> **📋 Daily Commands**: **[COMMANDS.md](COMMANDS.md)** ← Copy/paste ready commands  
+> **🔧 First Time Setup**: **[docs/SETUP.md](docs/SETUP.md)** ← One-time configuration
 
 ---
 
@@ -536,4 +540,223 @@ Free to use for educational purposes. For commercial use, please contact the aut
 **Status**: Phase 1 Complete ✅ + Major Enhancements | Production-Ready 🚀
 
 **Repository:** https://github.com/JusTraderZulu/Regime_Trading.git
+
+---
+
+## 🔗 QuantConnect Lean Integration
+
+The system now supports exporting deterministic signals for replay in **QuantConnect Lean**, enabling:
+- Local backtesting via Docker with full tick/minute-resolution data
+- Company-specific requirement validation (CAGR, Sharpe, Max DD, Avg PnL/Trade)
+- Flexible position sizing with target volatility
+- Multi-asset support (FX + Crypto)
+
+### Prerequisites
+
+1. **Docker Desktop**: Install from [docker.com](https://www.docker.com/) and ensure it's running
+2. **Lean CLI**: Install via pip
+   ```bash
+   pip install lean
+   ```
+3. **(Optional)** QuantConnect account for cloud data access
+
+### Quick Start: Lean Integration
+
+#### Step 1: Generate Signals from Pipeline
+
+Enable signals export in `config/settings.yaml`:
+
+```yaml
+lean:
+  export_signals: true  # Enable signals export
+  signals_dir: "data/signals"
+```
+
+Then run the pipeline:
+
+```bash
+# Generate signals for BTC-USD
+python -m src.ui.cli analyze BTC-USD --mode thorough
+
+# Output: data/signals/latest/signals.csv
+```
+
+**Signals Format**:
+```csv
+time,symbol,asset_class,venue,regime,side,weight,confidence,mid,spread,pip_value,fee_bps,funding_apr
+2024-01-15T00:00:00Z,BTCUSD,CRYPTO,GDAX,trending,1,0.5,0.75,45000.0,5.0,,,2.5
+```
+
+#### Step 2: Set Up Lean Symlink
+
+Create a symlink so Lean can read the signals:
+
+```bash
+# Automated setup
+python -c "from src.bridges.lean_gateway import ensure_lean_data_symlink; from pathlib import Path; ensure_lean_data_symlink(Path('data/signals/latest'))"
+
+# Or manually
+cd lean/data/alternative
+ln -s ../../../data/signals/latest my_signals
+```
+
+#### Step 3: Run Lean Backtest
+
+```bash
+cd lean
+lean backtest "RegimeSignalsAlgo"
+
+# Output: lean/backtests/<timestamp>/backtest.json
+```
+
+#### Step 4: Evaluate Against Company Requirements
+
+```bash
+# From project root
+python -m src.gates.evaluate_backtest \
+  --company config/company.acme.yaml \
+  --backtest lean/backtests/<timestamp>/backtest.json
+
+# Exit code 0 = PASS, 1 = FAIL
+```
+
+**Example Output**:
+```
+=== Gate Evaluation: ACME Capital ===
+Backtest Span.............. 10.2 years  ✓ PASS  (≥10 years)
+CAGR.......................    28.50%  ✓ PASS  (≥25%)
+Sharpe (excess)............      1.35  ✓ PASS  (≥1.0)
+Max Drawdown...............   -18.20%  ✓ PASS  (≤-20%)
+Avg PnL/Trade..............     0.82%  ✓ PASS  (≥0.75%)
+
+✓ RESULT: ALL GATES PASSED
+```
+
+### Full Workflow (Automated)
+
+Use the provided script to run the entire workflow:
+
+```bash
+# Run: Pipeline → Lean → Gates
+bash scripts/run_full_workflow.sh acme
+
+# Or use Cursor tasks (see .cursor/tasks.json)
+```
+
+### Company Configuration
+
+Create custom requirement files in `config/company.<name>.yaml`:
+
+```yaml
+company:
+  name: "Your Company"
+  risk_free_rate_annual: 0.05
+
+requirements:
+  min_backtest_years: 10
+  min_cagr: 0.25              # 25% minimum
+  min_sharpe_excess: 1.0      # Sharpe > RF
+  max_drawdown: 0.20          # Max 20% DD
+  min_avg_profit_per_trade: 0.0075  # 75 bps minimum
+
+universe:
+  fx: ["EURUSD", "GBPUSD", "USDJPY"]
+  crypto: ["BTCUSD", "ETHUSD"]
+  resolution: "Hour"
+  start: "2015-01-01"
+  end: "2025-01-01"
+
+execution:
+  portfolio_target_vol: 0.12  # 12% target vol
+  dd_circuit_1: 0.12          # Scale down at 12% DD
+  dd_circuit_2: 0.18          # Stop at 18% DD
+```
+
+See `config/company.example.yaml` for a complete template.
+
+### Architecture: Signals Bridge
+
+```
+[LangGraph Pipeline]
+    ↓ (regime decisions)
+    ↓
+[export_signals node] → signals.csv
+    ↓                        ↓
+[Existing: reports]    [QuantConnect Lean]
+                             ↓
+                       [evaluate_gates.py]
+                             ↓
+                       PASS/FAIL vs company.yaml
+```
+
+**Key Points**:
+- **Parallel Path**: Lean replays pipeline decisions; does NOT replace existing backtest.py
+- **No Breaking Changes**: All existing code continues working
+- **Signals-First**: Deterministic CSV export ensures no look-ahead bias
+- **Isolated**: All Lean code in `src/bridges/`, `src/gates/`, and `lean/`
+
+### Cursor Tasks
+
+Use the integrated tasks for quick execution (see `.cursor/tasks.json`):
+
+1. **Run Pipeline & Export Signals**: Generate signals from regime analysis
+2. **Lean Backtest (Latest Signals)**: Run QC backtest on latest signals
+3. **Evaluate Gates (ACME)**: Validate against company requirements
+4. **Full Workflow**: Run all steps end-to-end
+5. **Setup: Create Signals Symlink**: One-time setup
+6. **Test: Validate Signal Export**: Check signals.csv format
+
+### Lean Project Structure
+
+```
+lean/
+├── lean.json                    # Lean configuration
+├── Algorithm.Python/
+│   └── RegimeSignalsAlgo.py    # Main algorithm
+├── data/
+│   └── alternative/
+│       └── my_signals/         # → ../../data/signals/latest (symlink)
+└── backtests/                   # Output (auto-created)
+```
+
+See `lean/README.md` for detailed Lean-specific documentation.
+
+### Troubleshooting
+
+**Signals CSV Not Found**:
+```bash
+# Ensure signals export is enabled
+# config/settings.yaml: lean.export_signals = true
+
+# Re-run pipeline
+python -m src.ui.cli analyze BTC-USD --mode thorough
+```
+
+**Lean Can't Find Data**:
+```bash
+# Check symlink
+ls -la lean/data/alternative/my_signals
+
+# Re-create symlink
+python -c "from src.bridges.lean_gateway import ensure_lean_data_symlink; from pathlib import Path; ensure_lean_data_symlink(Path('data/signals/latest'))"
+```
+
+**Docker Issues**:
+```bash
+# Ensure Docker Desktop is running
+docker ps
+
+# If not running, start Docker Desktop application
+```
+
+### Benefits of Lean Integration
+
+1. **Realistic Execution**: Minute/tick-level fills with realistic spread/slippage
+2. **External Validation**: Meet institutional requirements (CAGR, Sharpe, DD)
+3. **Multi-Asset**: Test FX + Crypto simultaneously
+4. **Flexibility**: Easily adapt to different company constraints
+5. **Reproducibility**: Deterministic signals ensure consistent results
+6. **No Lock-In**: Lean is optional; existing workflow unaffected
+
+---
 

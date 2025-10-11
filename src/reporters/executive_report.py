@@ -101,6 +101,25 @@ def _save_artifacts(state: PipelineState, artifacts_dir: Path) -> None:
             contradictor.model_dump(),
             artifacts_dir / "contradictor_st.json",
         )
+    
+    # QuantConnect Results
+    qc_result = state.get("qc_backtest_result")
+    if qc_result:
+        save_json(
+            qc_result.model_dump() if hasattr(qc_result, 'model_dump') else qc_result.__dict__,
+            artifacts_dir / "qc_backtest_result.json",
+        )
+    
+    # Strategy Comparison (all tested strategies)
+    strategy_comparison = state.get("strategy_comparison_mt")
+    if strategy_comparison:
+        comparison_data = {
+            name: result.model_dump() for name, result in strategy_comparison.items()
+        }
+        save_json(
+            comparison_data,
+            artifacts_dir / "strategy_comparison.json",
+        )
 
     # Judge
     judge_report = state.get("judge_report")

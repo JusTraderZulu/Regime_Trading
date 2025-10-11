@@ -1,0 +1,18 @@
+# Lean backtest results
+backtests/
+*/backtests/
+
+# Lean cache
+.lean/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Lean logs
+*.log
+
+# Data (managed by parent project)
+data/*
+!data/alternative/
+

@@ -1,0 +1,42 @@
+# Company-Specific Configuration Template
+# Copy this file to company.<name>.yaml and customize
+
+company:
+  name: "Example Capital"
+  risk_free_rate_annual: 0.05  # 5% annual risk-free rate
+
+# Minimum requirements for strategy acceptance
+requirements:
+  min_backtest_years: 10
+  min_cagr: 0.25              # 25% minimum CAGR
+  min_sharpe_excess: 1.0      # Sharpe ratio above risk-free rate
+  max_drawdown: 0.20          # Maximum 20% drawdown
+  min_avg_profit_per_trade: 0.0075  # Minimum 75 bps per trade
+
+# Universe definition (for Lean backtests)
+universe:
+  fx:
+    - EURUSD
+    - GBPUSD
+    - USDJPY
+    - AUDUSD
+  crypto:
+    - BTCUSD
+    - ETHUSD
+  resolution: "Hour"  # Hour | Daily | Minute
+  start: "2015-01-01"
+  end: "2025-01-01"
+
+# Execution parameters
+execution:
+  portfolio_target_vol: 0.12  # Target 12% annualized volatility
+  dd_circuit_1: 0.12          # Reduce exposure at 12% drawdown
+  dd_circuit_2: 0.18          # Stop trading at 18% drawdown
+  max_leverage: 3.0           # Maximum leverage allowed
+
+# Live trading settings
+live:
+  use_https_signals: false
+  signals_url: ""  # URL to fetch signals in live mode (if enabled)
+  update_frequency_seconds: 3600  # How often to check for new signals
+

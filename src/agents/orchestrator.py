@@ -2,15 +2,17 @@
 Orchestrator - Coordinates pipeline flow and contains regime detection logic.
 """
 
+import json
 import logging
 from datetime import datetime
-from typing import Dict
+from pathlib import Path
+from typing import Dict, List, Optional
 
 from src.core.schemas import FeatureBundle, RegimeDecision, RegimeLabel, Tier
 from src.core.state import PipelineState
 from src.core.utils import create_artifacts_dir
 from src.core.progress import track_node
-from src.tools.backtest import backtest, select_strategy_for_regime, test_multiple_strategies
+from src.tools.backtest import backtest, walk_forward_analysis, test_multiple_strategies
 from src.tools.data_loaders import get_polygon_bars
 from src.tools.features import compute_feature_bundle
 
@@ -335,42 +337,6 @@ def classify_regime(
 
 
 # ============================================================================
-# Strategy Selection Node
-# ============================================================================
-
-
-def select_strategy_node(state: PipelineState) -> Dict:
-    """
-    LangGraph node: Select strategies for all tiers.
-
-    Reads:
-        - regime_{tier}
-
-    Writes:
-        - strategy_{tier}
-    """
-    logger.info("📈 [5/8] Selecting strategies")
-
-    config = state["config"]
-
-    results = {}
-
-    for tier_str in ["LT", "MT", "ST"]:
-        tier_key = tier_str.lower()
-        regime = state.get(f"regime_{tier_key}")
-
-        if regime is None:
-            results[f"strategy_{tier_key}"] = None
-            continue
-
-        strategy = select_strategy_for_regime(regime.label, config)
-        results[f"strategy_{tier_key}"] = strategy
-        logger.info(f"Strategy {tier_str}: {strategy.name} for regime {regime.label.value}")
-
-    return results
-
-
-# ============================================================================
 # Backtest Node
 # ============================================================================
 
@@ -408,8 +374,8 @@ def backtest_node(state: PipelineState) -> Dict:
             "primary_execution_tier": "MT",
         }
 
-    logger.info("Thorough mode: Testing multiple strategies per regime")
-    logger.info("Strategy: Analyze on MT (4H), Execute backtest on ST (15m)")
+    logger.info("Thorough mode: Performing walk-forward analysis")
+    logger.info("Strategy: Analyze on MT (4H), Walk-forward on ST (15m)")
     logger.info("Rationale: MT detects regime, ST provides realistic execution simulation")
 
     results = {}
@@ -467,13 +433,13 @@ def backtest_node(state: PipelineState) -> Dict:
     
     logger.info(f"MT Analysis: Best strategy = {best_mt.strategy.name} (Sharpe={best_mt.sharpe:.2f})")
     
-    # Step 3: Execute SAME strategy on ST (15m) for realistic execution
-    logger.info(f"Executing {best_mt.strategy.name} on ST (15m) for realistic simulation")
+    # Step 3: Perform Walk-Forward Analysis on ST (15m) for realistic execution
+    logger.info(f"Performing Walk-Forward Analysis on ST (15m) for regime {mt_regime.value}")
     
     if data_st is not None and not data_st.empty:
-        # Execute best strategy from MT on ST timeframe
-        st_backtest = backtest(
-            strategy_spec=best_mt.strategy,  # Use MT's best strategy
+        # Execute walk-forward analysis on ST timeframe
+        st_backtest = walk_forward_analysis(
+            regime=mt_regime,
             df=data_st,
             config=config,
             artifacts_dir=artifacts_dir,  # Save ST artifacts
@@ -481,15 +447,17 @@ def backtest_node(state: PipelineState) -> Dict:
             symbol=symbol,
         )
         
-        logger.info(
-            f"✓ EXECUTION SIMULATION (ST): {st_backtest.strategy.name} "
-            f"(Sharpe={st_backtest.sharpe:.2f}, MaxDD={st_backtest.max_drawdown:.1%})"
-        )
-        logger.info(f"Strategy selected from MT regime, executed on ST timeframe")
-        
-        results["backtest_st"] = st_backtest
+        if st_backtest:
+            logger.info(
+                f"✓ WALK-FORWARD (ST): {st_backtest.strategy.name} "
+                f"(Sharpe={st_backtest.sharpe:.2f}, MaxDD={st_backtest.max_drawdown:.1%})"
+            )
+            results["backtest_st"] = st_backtest
+        else:
+            logger.warning("Walk-forward analysis on ST failed or produced no results.")
+            results["backtest_st"] = None
     else:
-        logger.warning("ST data missing, using MT backtest only")
+        logger.warning("ST data missing, skipping walk-forward analysis")
         results["backtest_st"] = None
     
     # Store MT analysis results
@@ -507,6 +475,304 @@ def backtest_node(state: PipelineState) -> Dict:
     results["backtest_lt"] = None
 
     return results
+
+
+# ============================================================================
+# Signals Export Node (Optional - for Lean Integration)
+# ============================================================================
+
+
+def export_signals_node(state: PipelineState) -> Dict:
+    """
+    LangGraph node: Export signals for QuantConnect Lean consumption (optional).
+    
+    Only runs if config.lean.export_signals is True.
+    Converts regime decisions to SignalRows and writes CSV.
+    
+    Reads:
+        - regime_{tier}, config, symbol, timestamp
+    
+    Writes:
+        - signals_csv_path (optional)
+    """
+    config = state["config"]
+    
+    # Check if signals export is enabled
+    if not config.get("lean", {}).get("export_signals", False):
+        logger.debug("Signals export disabled (config.lean.export_signals=false)")
+        return {}
+    
+    logger.info("📤 Exporting signals for Lean consumption")
+    
+    try:
+        from src.bridges.signals_writer import write_signals_csv
+        from src.bridges.signal_schema import SignalRow
+        from src.bridges.symbol_map import parse_symbol_info
+    except ImportError as e:
+        logger.error(f"Failed to import bridges package: {e}")
+        return {}
+    
+    # Extract regime decisions
+    regime_lt = state.get("regime_lt")
+    regime_mt = state.get("regime_mt")
+    regime_st = state.get("regime_st")
+    
+    regimes = [
+        ("LT", regime_lt, state.get("data_lt")),
+        ("MT", regime_mt, state.get("data_mt")),
+        ("ST", regime_st, state.get("data_st")),
+    ]
+    
+    signals = []
+    
+    # Get backtest results to extract strategy info
+    backtest_mt = state.get("backtest_mt")
+    backtest_st = state.get("backtest_st")
+    
+    for tier_name, regime, data in regimes:
+        if regime is None or data is None or data.empty:
+            logger.warning(f"Skipping {tier_name}: regime or data missing")
+            continue
+        
+        # Parse symbol info
+        try:
+            qc_symbol, asset_class, venue = parse_symbol_info(regime.symbol)
+        except Exception as e:
+            logger.error(f"Failed to parse symbol {regime.symbol}: {e}")
+            continue
+        
+        # Get latest bar time from data
+        bar_time = data.index[-1]
+        
+        # Get mid price
+        mid_price = data["close"].iloc[-1] if "close" in data.columns else None
+        
+        # Map regime to side (-1, 0, 1)
+        side = regime_to_side(regime.label)
+        
+        # Use confidence as weight (scaled to 0-1)
+        weight = regime.confidence if side != 0 else 0.0
+        
+        # Get strategy info from backtest results
+        strategy_name = None
+        strategy_params = None
+        
+        if tier_name == "MT" and backtest_mt:
+            strategy_name = backtest_mt.strategy.name
+            strategy_params = json.dumps(backtest_mt.strategy.params)
+        elif tier_name == "ST" and backtest_st:
+            strategy_name = backtest_st.strategy.name
+            strategy_params = json.dumps(backtest_st.strategy.params)
+        
+        # Create signal row
+        signal = SignalRow(
+            time=bar_time,
+            symbol=qc_symbol,
+            asset_class=asset_class,
+            venue=venue,
+            regime=regime.label.value,
+            side=side,
+            weight=weight,
+            confidence=regime.confidence,
+            mid=float(mid_price) if mid_price is not None else None,
+            strategy_name=strategy_name,
+            strategy_params=strategy_params,
+        )
+        
+        signals.append(signal)
+        logger.info(
+            f"  {tier_name}: {qc_symbol} {regime.label.value} | "
+            f"strategy={strategy_name or 'N/A'} | "
+            f"side={side} weight={weight:.2f} conf={regime.confidence:.2f}"
+        )
+    
+    if not signals:
+        logger.warning("No signals generated")
+        return {}
+    
+    # Determine output path
+    run_id = state["timestamp"].strftime("%Y%m%d-%H%M%S")
+    signals_dir = Path(config.get("lean", {}).get("signals_dir", "data/signals"))
+    
+    output_path = signals_dir / run_id / "signals.csv"
+    latest_path = signals_dir / "latest" / "signals.csv"
+    
+    # Write signals
+    try:
+        write_signals_csv(signals, output_path)
+        write_signals_csv(signals, latest_path)
+        
+        logger.info(f"✓ Signals exported: {output_path}")
+        logger.info(f"✓ Latest link: {latest_path}")
+        
+        return {"signals_csv_path": str(output_path)}
+        
+    except Exception as e:
+        logger.error(f"Failed to write signals CSV: {e}")
+        return {}
+
+
+def regime_to_side(regime_label: RegimeLabel) -> int:
+    """
+    Map regime label to position side.
+    
+    Args:
+        regime_label: Detected regime
+    
+    Returns:
+        -1 (short), 0 (flat), 1 (long)
+    """
+    if regime_label == RegimeLabel.TRENDING:
+        return 1  # Long bias in trending markets
+    elif regime_label == RegimeLabel.VOLATILE_TRENDING:
+        return 1  # Long bias in volatile trending
+    elif regime_label == RegimeLabel.MEAN_REVERTING:
+        return 0  # Flat or strategy-dependent (default flat)
+    elif regime_label == RegimeLabel.RANDOM:
+        return 0  # Flat in random walk
+    elif regime_label == RegimeLabel.UNCERTAIN:
+        return 0  # Flat when uncertain
+    else:
+        return 0  # Default to flat
+
+
+# ============================================================================
+# QuantConnect Backtest Node (Optional)
+# ============================================================================
+
+
+def qc_backtest_node(state: PipelineState) -> Dict:
+    """
+    LangGraph node: Submit to QuantConnect Cloud for validation (optional).
+    
+    Only runs if config.qc.auto_submit is True.
+    Uploads algorithm, runs backtest, fetches results.
+    
+    Reads:
+        - signals_csv_path, config
+    
+    Writes:
+        - qc_backtest_result, qc_backtest_id
+    """
+    config = state["config"]
+    
+    # Check if QC auto-submit is enabled (via config or CLI flag)
+    import os
+    auto_submit = config.get("qc", {}).get("auto_submit", False) or os.environ.get('QC_AUTO_SUBMIT') == '1'
+    
+    if not auto_submit:
+        logger.debug("QC auto-submit disabled (use config.qc.auto_submit or --qc-backtest flag)")
+        return {}
+    
+    logger.info("☁️  Submitting to QuantConnect Cloud for validation")
+    
+    # Check if signals were exported
+    signals_csv_path = state.get("signals_csv_path")
+    if not signals_csv_path:
+        logger.warning("No signals exported, skipping QC backtest")
+        return {}
+    
+    try:
+        from src.integrations.qc_mcp_client import QCMCPClient
+        from pathlib import Path
+        import subprocess
+    except ImportError as e:
+        logger.error(f"Failed to import QC client: {e}")
+        return {}
+    
+    # Generate algorithm with embedded signals
+    logger.info("Generating QC algorithm...")
+    try:
+        result = subprocess.run(
+            ["python", "scripts/generate_qc_algorithm.py"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        algorithm_path = Path("lean/generated_algorithm.py")
+        logger.info(f"✓ Algorithm generated: {algorithm_path}")
+    except Exception as e:
+        logger.error(f"Algorithm generation failed: {e}")
+        return {}
+    
+    # Get project ID
+    project_id_path = Path("qc_project_id.txt")
+    if not project_id_path.exists():
+        logger.warning("QC project ID not found (qc_project_id.txt)")
+        return {}
+    
+    project_id = project_id_path.read_text().strip()
+    
+    # Create client and submit
+    client = QCMCPClient()
+    
+    if not client.api_token or not client.user_id:
+        logger.warning("QC credentials not configured")
+        return {}
+    
+    # Get wait preference from config
+    wait_for_results = config.get("qc", {}).get("wait_for_results", False)
+    timeout = config.get("qc", {}).get("timeout_seconds", 300)
+    
+    # Run backtest
+    backtest_name = f"Pipeline_{state['symbol']}_{state['timestamp'].strftime('%Y%m%d_%H%M%S')}"
+    
+    logger.info("")
+    logger.info("=" * 70)
+    logger.info(f"☁️  QUANTCONNECT CLOUD BACKTEST")
+    logger.info("=" * 70)
+    logger.info(f"Backtest Name: {backtest_name}")
+    logger.info(f"Strategy: Will execute your selected strategy in QC")
+    logger.info(f"Wait for results: {wait_for_results}")
+    if not wait_for_results:
+        logger.info(f"⚡ Running in background - check QC terminal for results")
+    logger.info("=" * 70)
+    logger.info("")
+    
+    qc_result = client.run_full_backtest(
+        algorithm_path=algorithm_path,
+        project_id=project_id,
+        backtest_name=backtest_name,
+        wait=wait_for_results
+    )
+    
+    if qc_result:
+        logger.info("")
+        logger.info("=" * 70)
+        logger.info("🎉 QUANTCONNECT BACKTEST COMPLETE!")
+        logger.info("=" * 70)
+        logger.info(f"Sharpe Ratio: {qc_result.sharpe:.2f}" if qc_result.sharpe else "Sharpe: N/A")
+        logger.info(f"CAGR: {qc_result.cagr:.2%}" if qc_result.cagr else "CAGR: N/A")
+        logger.info(f"Max Drawdown: {qc_result.max_drawdown:.2%}" if qc_result.max_drawdown else "Max DD: N/A")
+        logger.info(f"Total Trades: {qc_result.total_trades}" if qc_result.total_trades else "Trades: N/A")
+        logger.info("")
+        logger.info(f"🌐 View Full Results:")
+        logger.info(f"   https://www.quantconnect.com/terminal/{project_id}/{qc_result.backtest_id}")
+        logger.info("=" * 70)
+        logger.info("")
+        
+        return {
+            "qc_backtest_result": qc_result,
+            "qc_backtest_id": qc_result.backtest_id,
+            "qc_project_id": project_id,
+        }
+    elif not wait_for_results:
+        # Submitted but not waiting
+        logger.info("")
+        logger.info("✅ Backtest submitted to QuantConnect Cloud")
+        logger.info(f"🌐 Check status: https://www.quantconnect.com/terminal/{project_id}")
+        logger.info("⏳ Results will be available in 2-5 minutes")
+        logger.info("")
+        return {
+            "qc_backtest_submitted": True,
+            "qc_project_id": project_id,
+        }
+    else:
+        logger.warning("")
+        logger.warning("⚠️  QC backtest timed out (still running in cloud)")
+        logger.warning(f"🌐 Check results: https://www.quantconnect.com/terminal/{project_id}")
+        logger.warning("")
+        return {}
 
 
 # ============================================================================
