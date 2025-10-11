@@ -10,24 +10,61 @@ A production-ready system for detecting market regimes, recommending strategies,
 
 ---
 
+## ⚡ Quick Start
+
+```bash
+# Clone and setup
+git clone https://github.com/JusTraderZulu/Regime_Trading.git
+cd Regime_Trading
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# Run analysis (example)
+python -m src.ui.cli run --symbol X:BTCUSD --mode thorough
+```
+
+**Output**: Complete regime analysis + strategy selection + backtest results in ~30 seconds
+
+**For detailed commands**: See [COMMANDS.md](COMMANDS.md)
+
+---
+
 ## 🎯 Project Overview
 
-This system analyzes crypto markets across three timeframes (LT/MT/ST) using statistical features, cross-asset context (CCM), and regime detection to produce actionable intelligence.
+This system analyzes crypto and forex markets across three timeframes (LT/MT/ST) using statistical features and regime detection to automatically select and optimize trading strategies.
 
 ### Key Features
 
+#### **Core Intelligence**
 - ✅ **Multi-Timeframe Analysis**: Long-term (1D), Medium-term (4H), Short-term (15m)
-- 📊 **10+ Statistical Methods**: Hurst (R/S & DFA with CI), Multi-lag VR, ADF, Autocorrelation, Half-life, ARCH-LM, Rolling stats, Distribution stability
+- 📊 **10+ Statistical Methods**: Hurst (R/S & DFA with CI), Multi-lag VR, ADF, Autocorrelation, Half-life, ARCH-LM
 - 🧠 **Weighted Voting System**: Consensus from multiple statistical signals (not single method)
-- 🌐 **Cross-Asset Context (CCM)**: Nonlinear coupling with ETH, SOL, SPY, DXY, VIX
 - 🤖 **Agentic Pipeline**: LangGraph orchestration with Judge + Contradictor validation
-- 🎯 **Multi-Strategy Testing**: 9 strategies tested per regime, best auto-selected
-- 📈 **Comprehensive Backtesting**: 40+ institutional metrics (VaR, CVaR, Ulcer, Information Ratio)
-- 📊 **Baseline Comparison**: vs Buy-and-Hold with Alpha calculation
-- 🤖 **AI-Powered Insights**: Perplexity AI (internet-connected) for market intelligence + parameter optimization + TP/SL recommendations
-- 📄 **Professional Reports**: Markdown + PDF + JSON with narrative flow
-- 💻 **Interfaces**: CLI + Telegram bot + INDEX.md navigation
-- ✅ **Schema-Driven**: Full Pydantic validation for every agent
+
+#### **Strategy & Backtesting** ✨ NEW
+- 🎯 **Automated Strategy Selection**: Tests 9 strategies per regime, picks best automatically
+- ⚙️ **Parameter Optimization**: Grid search finds optimal settings (e.g., MA Cross fast=20, slow=50)
+- 📈 **Walk-Forward Analysis**: Robust validation without lookahead bias
+- 💰 **Risk Management**: Position sizing based on regime confidence
+- 📊 **40+ Institutional Metrics**: Sharpe, Sortino, Calmar, VaR, CVaR, Ulcer, Information Ratio
+
+#### **QuantConnect Cloud Integration** ✨ NEW
+- ☁️ **Automated Submission**: One command submits to QC Cloud
+- 🎯 **Strategy Execution**: QC runs YOUR optimized strategy (not just signals!)
+- 📊 **Side-by-Side Comparison**: In-house vs Cloud results
+- ✅ **Third-Party Validation**: Institutional credibility
+
+#### **Multi-Asset Support** ✨ NEW
+- 💱 **Crypto**: BTC, ETH, SOL, XRP (2-3 years of data)
+- 💵 **Forex**: EUR/USD, GBP/USD, USD/JPY, etc. (10+ years via QC)
+- 🎯 **Perfect for Funds**: Meets 10-year backtest requirement
+
+#### **Professional Output**
+- 📄 **Enhanced Reports**: Clear paths, mode labels, strategy details
+- 🤖 **AI Insights**: Perplexity AI (internet-connected) for market intelligence
+- 📊 **Company Gates**: Validate against specific requirements (CAGR, Sharpe, DD, etc.)
+- 💻 **User-Friendly**: Copy-paste commands, clear output
 
 ### Architecture
 
