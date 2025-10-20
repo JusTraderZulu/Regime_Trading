@@ -4,7 +4,7 @@ Orchestrator - Coordinates pipeline flow and contains regime detection logic.
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -13,8 +13,14 @@ from src.core.state import PipelineState
 from src.core.utils import create_artifacts_dir
 from src.core.progress import track_node
 from src.tools.backtest import backtest, walk_forward_analysis, test_multiple_strategies
-from src.tools.data_loaders import get_polygon_bars
+from src.tools.data_loaders import get_polygon_bars, fetch_quotes_data
 from src.tools.features import compute_feature_bundle
+from src.tools.levels import compute_technical_levels
+from src.tools.regime_hysteresis import (
+    apply_hysteresis,
+    load_regime_memory,
+    save_regime_memory,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +66,27 @@ def load_data_node(state: PipelineState) -> Dict:
                 df = get_polygon_bars(symbol, bar, lookback_days=lookback)
                 results[f"data_{tier_key}"] = df
                 logger.info(f"Loaded {len(df)} bars for {tier_str} ({bar})")
+
+                # Also fetch quotes data for microstructure analysis (for crypto)
+                if symbol.startswith('X:'):  # Crypto symbols
+                    try:
+                        from src.tools.data_loaders import fetch_quotes_data
+                        end_date = datetime.now().strftime('%Y-%m-%d')
+                        start_date = (datetime.now() - timedelta(days=min(lookback, 7))).strftime('%Y-%m-%d')  # Last 7 days for quotes
+
+                        quotes_df = fetch_quotes_data(symbol, start_date, end_date)
+                        if not quotes_df.empty:
+                            # Save quotes data for microstructure analysis
+                            quotes_dir = Path("data") / "quotes"
+                            quotes_dir.mkdir(exist_ok=True)
+                            quotes_file = quotes_dir / f"{symbol.replace(':', '_')}_quotes_{end_date}.parquet"
+                            quotes_df.to_parquet(quotes_file)
+                            logger.info(f"✅ Saved {len(quotes_df)} quotes for microstructure analysis")
+                        else:
+                            logger.info("No quotes data available for microstructure analysis")
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch quotes data: {e}")
+
             except Exception as e:
                 logger.error(f"Failed to load data for {tier_str}: {e}")
                 results[f"data_{tier_key}"] = None
@@ -127,6 +154,15 @@ def compute_features_node(state: PipelineState) -> Dict:
                 logger.error(f"Failed to compute features for {tier_str}: {e}")
                 results[f"features_{tier_key}"] = None
 
+        # Compute technical levels for summarizer
+        technical_levels = compute_technical_levels(
+            df=state.get("data_st"),
+            pivot_lookback=config.get("technical_levels", {}).get("pivot_lookback", 20),
+            donchian_lookback=config.get("technical_levels", {}).get("donchian_lookback", 20),
+            atr_period=config.get("technical_levels", {}).get("atr_period", 14),
+        )
+        results["technical_levels"] = technical_levels.to_dict()
+
         return results
 
 
@@ -152,6 +188,10 @@ def detect_regime_node(state: PipelineState) -> Dict:
     symbol = state["symbol"]
 
     results = {}
+    hysteresis_config = config.get("regime", {}).get("hysteresis", {})
+    hysteresis_enabled = hysteresis_config.get("enabled", False)
+    regime_memory = load_regime_memory() if hysteresis_enabled else {}
+    memory_modified = False
 
     for tier_str in ["LT", "MT", "ST"]:
         tier = Tier(tier_str)
@@ -167,6 +207,13 @@ def detect_regime_node(state: PipelineState) -> Dict:
 
         try:
             regime = classify_regime(features, ccm, config, timestamp)
+            if hysteresis_enabled:
+                regime, regime_memory = apply_hysteresis(
+                    decision=regime,
+                    memory=regime_memory,
+                    settings=hysteresis_config,
+                )
+                memory_modified = True
             results[f"regime_{tier_key}"] = regime
             logger.info(
                 f"Regime {tier_str}: {regime.label.value} (confidence={regime.confidence:.2f})"
@@ -174,6 +221,9 @@ def detect_regime_node(state: PipelineState) -> Dict:
         except Exception as e:
             logger.error(f"Failed to detect regime for {tier_str}: {e}")
             results[f"regime_{tier_key}"] = None
+
+    if memory_modified:
+        save_regime_memory(regime_memory)
 
     return results
 
@@ -257,17 +307,38 @@ def classify_regime(
         votes[RegimeLabel.RANDOM] += weights["adf"] * 0.5
     
     # Signal 5: Volatility Pattern (5% weight)
-    # High volatility + trend = volatile trending
-    if features.returns_vol > 0.03:
-        votes[RegimeLabel.TRENDING] += weights["volatility"] * 0.5
-        # Mark for potential volatile_trending classification
+    vol_weight = weights.get("volatility", 0.05)
+    vol_cfg = regime_config.get("volatility_signal", {})
+    realized_threshold = vol_cfg.get("realized_vol_threshold", 0.03)
+    garch_high_ratio = vol_cfg.get("garch_high_ratio", 1.25)
+    garch_low_ratio = vol_cfg.get("garch_low_ratio", 0.85)
+    garch_ratio = getattr(features, "garch_vol_ratio", None)
+
+    if garch_ratio is not None:
+        if garch_ratio >= garch_high_ratio:
+            votes[RegimeLabel.TRENDING] += vol_weight
+        elif garch_ratio <= garch_low_ratio:
+            votes[RegimeLabel.MEAN_REVERTING] += vol_weight
+        else:
+            votes[RegimeLabel.RANDOM] += vol_weight * 0.5
+    else:
+        if features.returns_vol > realized_threshold:
+            votes[RegimeLabel.TRENDING] += vol_weight * 0.5
+        else:
+            votes[RegimeLabel.RANDOM] += vol_weight * 0.5
     
     # Select regime with highest vote
     label = max(votes, key=votes.get)
     base_confidence = votes[label]
     
     # Check for volatile trending (high vol + trending)
-    if label == RegimeLabel.TRENDING and features.returns_vol > 0.03:
+    high_vol_signal = False
+    if garch_ratio is not None:
+        high_vol_signal = garch_ratio >= garch_high_ratio
+    else:
+        high_vol_signal = features.returns_vol > realized_threshold
+
+    if label == RegimeLabel.TRENDING and high_vol_signal:
         label = RegimeLabel.VOLATILE_TRENDING
         base_confidence += 0.05  # Bonus for specific sub-regime
 
@@ -333,6 +404,7 @@ def classify_regime(
         sector_coupling=ccm.sector_coupling if ccm else None,
         macro_coupling=ccm.macro_coupling if ccm else None,
         rationale=rationale,
+        base_label=label,
     )
 
 
@@ -346,7 +418,10 @@ def backtest_node(state: PipelineState) -> Dict:
     LangGraph node: Run backtests (conditional on mode).
 
     In 'fast' mode: Skip backtest
-    In 'thorough' mode: Test ALL strategies for regime and select best
+    In 'thorough' mode: 
+        1. Optimize strategies for regime (find best parameters)
+        2. Test ALL optimized strategies
+        3. Select best performer
 
     Strategy is based on MT (medium-term) regime, influenced by LT context.
     ST is too noisy without L2 orderbook data (Phase 2).
@@ -357,6 +432,7 @@ def backtest_node(state: PipelineState) -> Dict:
     Writes:
         - backtest_{tier} (best strategy)
         - strategy_comparison_{tier} (all tested strategies)
+        - optimization_results_{tier} (parameter optimization results)
         - primary_execution_tier (which tier drives execution)
     """
     run_mode = state["run_mode"]
@@ -365,18 +441,21 @@ def backtest_node(state: PipelineState) -> Dict:
     artifacts_dir = state.get("artifacts_dir")
 
     if run_mode == "fast":
-        logger.info("Fast mode: Skipping backtest")
+        logger.info("Fast mode: Skipping backtest and optimization")
         return {
             "backtest_lt": None, 
             "backtest_mt": None, 
             "backtest_st": None,
             "strategy_comparison_mt": None,
+            "optimization_results_mt": None,
+            "optimization_results_st": None,
             "primary_execution_tier": "MT",
         }
 
-    logger.info("Thorough mode: Performing walk-forward analysis")
-    logger.info("Strategy: Analyze on MT (4H), Walk-forward on ST (15m)")
-    logger.info("Rationale: MT detects regime, ST provides realistic execution simulation")
+    logger.info("Thorough mode: Parameter optimization + walk-forward analysis")
+    logger.info("Step 1: Optimize strategy parameters for detected regime")
+    logger.info("Step 2: Analyze on MT (4H), Walk-forward on ST (15m)")
+    logger.info("Rationale: Find optimal parameters, then validate with realistic execution")
 
     results = {}
     
@@ -388,7 +467,7 @@ def backtest_node(state: PipelineState) -> Dict:
     data_mt = state.get("data_mt")
     data_st = state.get("data_st")
 
-    # Step 1: Use MT (4H) regime to select strategy
+    # Check if regime detection succeeded
     if regime_mt is None:
         logger.warning("MT regime missing, cannot select strategy")
         return {
@@ -396,8 +475,45 @@ def backtest_node(state: PipelineState) -> Dict:
             "backtest_mt": None,
             "backtest_lt": None,
             "strategy_comparison_mt": None,
+            "optimization_results_mt": None,
+            "optimization_results_st": None,
             "primary_execution_tier": "MT",
         }
+    
+    # Step 1: OPTIMIZE strategies for MT regime
+    logger.info(f"🎯 Optimizing strategies for {regime_mt.label.value} regime...")
+    
+    from src.tools.strategy_optimizer import optimize_for_regime
+    from pathlib import Path
+    
+    optimization_dir = Path(artifacts_dir) / "optimization" if artifacts_dir else None
+    
+    try:
+        optimization_results = optimize_for_regime(
+            regime=regime_mt.label,
+            data=data_mt,
+            symbol=symbol,
+            tier=Tier.MT,
+            config=config,
+            output_dir=optimization_dir,
+        )
+        
+        if optimization_results:
+            logger.info(f"✓ Optimization complete: {optimization_results['best_strategy']['strategy_name']}")
+            logger.info(f"  Best params: {optimization_results['best_strategy']['best_params']}")
+            logger.info(f"  Sharpe: {optimization_results['best_strategy']['best_backtest'].sharpe:.2f}")
+            
+            # Store optimization results
+            results['optimization_results_mt'] = optimization_results
+        else:
+            logger.warning("Optimization failed, falling back to default parameters")
+            results['optimization_results_mt'] = None
+            
+    except Exception as e:
+        logger.error(f"Optimization error: {e}")
+        results['optimization_results_mt'] = None
+    
+    # Step 2: Use MT (4H) regime to select strategy (now with optimized params)
     
     mt_regime = regime_mt.label
     
@@ -564,7 +680,34 @@ def export_signals_node(state: PipelineState) -> Dict:
             strategy_name = backtest_st.strategy.name
             strategy_params = json.dumps(backtest_st.strategy.params)
         
-        # Create signal row
+        # Get microstructure data for this tier
+        microstructure_data = state.get(f"microstructure_{tier_name.lower()}")
+        microstructure_data_quality = None
+        microstructure_market_efficiency = None
+        microstructure_liquidity = None
+        microstructure_bid_ask_spread_bps = None
+        microstructure_ofi_imbalance = None
+        microstructure_microprice = None
+
+        if microstructure_data and hasattr(microstructure_data, 'summary'):
+            microstructure_data_quality = microstructure_data.summary.data_quality_score
+            microstructure_market_efficiency = microstructure_data.summary.market_efficiency
+            microstructure_liquidity = microstructure_data.summary.liquidity_assessment
+
+            # Get additional microstructure metrics
+            if hasattr(microstructure_data, 'bid_ask_spread') and microstructure_data.bid_ask_spread:
+                microstructure_bid_ask_spread_bps = microstructure_data.bid_ask_spread.spread_mean_bps
+
+            if hasattr(microstructure_data, 'order_flow_imbalance') and microstructure_data.order_flow_imbalance:
+                # Get OFI for the first window
+                ofi_data = microstructure_data.order_flow_imbalance.ofi_values
+                if ofi_data and len(ofi_data) > 0:
+                    microstructure_ofi_imbalance = ofi_data[0].ofi_mean
+
+            if hasattr(microstructure_data, 'microprice') and microstructure_data.microprice:
+                microstructure_microprice = microstructure_data.microprice.microprice_mean
+
+        # Create signal row with microstructure data
         signal = SignalRow(
             time=bar_time,
             symbol=qc_symbol,
@@ -577,6 +720,12 @@ def export_signals_node(state: PipelineState) -> Dict:
             mid=float(mid_price) if mid_price is not None else None,
             strategy_name=strategy_name,
             strategy_params=strategy_params,
+            microstructure_data_quality=microstructure_data_quality,
+            microstructure_market_efficiency=microstructure_market_efficiency,
+            microstructure_liquidity=microstructure_liquidity,
+            microstructure_bid_ask_spread_bps=microstructure_bid_ask_spread_bps,
+            microstructure_ofi_imbalance=microstructure_ofi_imbalance,
+            microstructure_microprice=microstructure_microprice,
         )
         
         signals.append(signal)
@@ -656,14 +805,21 @@ def qc_backtest_node(state: PipelineState) -> Dict:
     """
     config = state["config"]
     
-    # Check if QC auto-submit is enabled (via config or CLI flag)
     import os
-    auto_submit = config.get("qc", {}).get("auto_submit", False) or os.environ.get('QC_AUTO_SUBMIT') == '1'
-    
+    config_auto_submit = config.get("qc", {}).get("auto_submit", False)
+    env_override = os.environ.get("QC_AUTO_SUBMIT") == "1"
+
+    if not config_auto_submit and not env_override:
+        logger.debug("QC auto-submit disabled (config.qc.auto_submit=false and QC_AUTO_SUBMIT not set)")
+        return {}
+
+    # Check if QC auto-submit is enabled (via config or CLI flag)
+    auto_submit = config_auto_submit or env_override
+
     if not auto_submit:
         logger.debug("QC auto-submit disabled (use config.qc.auto_submit or --qc-backtest flag)")
         return {}
-    
+
     logger.info("☁️  Submitting to QuantConnect Cloud for validation")
     
     # Check if signals were exported
@@ -801,4 +957,3 @@ def setup_artifacts_node(state: PipelineState) -> Dict:
         logger.info(f"Artifacts directory: {artifacts_dir}")
 
         return {"artifacts_dir": str(artifacts_dir)}
-

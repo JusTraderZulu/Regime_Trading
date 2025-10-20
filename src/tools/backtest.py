@@ -198,8 +198,140 @@ def ema_cross_strategy(df: pd.DataFrame, fast: int = 8, slow: int = 21) -> pd.Se
     signals = pd.Series(0, index=df.index)
     signals[ema_fast > ema_slow] = 1
     signals[ema_fast < ema_slow] = -1
-    
+
     return signals
+
+
+def _infer_bar_from_index(index: pd.Index) -> str:
+    """Infer bar string from index spacing."""
+    if len(index) < 2:
+        return "1d"
+
+    delta = index[1] - index[0]
+    minutes = int(delta.total_seconds() // 60) if hasattr(delta, "total_seconds") else 1440
+
+    mapping = {
+        1: "1m",
+        5: "5m",
+        15: "15m",
+        30: "30m",
+        60: "1h",
+        120: "2h",
+        240: "4h",
+        720: "12h",
+        1440: "1d",
+    }
+
+    return mapping.get(minutes, "1d")
+
+
+def atr_trailing_stop_strategy(
+    df: pd.DataFrame,
+    ema_period: int = 21,
+    atr_period: int = 14,
+    atr_mult: float = 3.0,
+) -> pd.Series:
+    """Trend strategy with ATR-based trailing stops.
+
+    - Enters long/short based on EMA direction.
+    - Flattens positions when price breaches ATR trailing stops.
+    """
+    df = df.copy()
+
+    ema = df["close"].ewm(span=ema_period, adjust=False).mean()
+
+    high_low = df["high"] - df["low"]
+    high_close = (df["high"] - df["close"].shift()).abs()
+    low_close = (df["low"] - df["close"].shift()).abs()
+    true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    atr = true_range.rolling(atr_period).mean()
+
+    trend = pd.Series(0, index=df.index)
+    trend[df["close"] > ema] = 1
+    trend[df["close"] < ema] = -1
+
+    trend = trend.replace(0, np.nan).ffill().fillna(0)
+
+    stop_long = ema - atr_mult * atr
+    stop_short = ema + atr_mult * atr
+
+    position = 0
+    signals = []
+
+    for ts in df.index:
+        trend_dir = trend.loc[ts]
+        price = df.loc[ts, "close"]
+        curr_stop_long = stop_long.loc[ts]
+        curr_stop_short = stop_short.loc[ts]
+
+        if position == 0:
+            position = trend_dir
+        else:
+            if position == 1 and not np.isnan(curr_stop_long) and price < curr_stop_long:
+                position = 0
+            elif position == -1 and not np.isnan(curr_stop_short) and price > curr_stop_short:
+                position = 0
+            elif position == 0:
+                position = trend_dir
+
+        signals.append(position if not np.isnan(position) else 0)
+
+    return pd.Series(signals, index=df.index)
+
+
+def pairs_mean_reversion_strategy(
+    df: pd.DataFrame,
+    benchmark_symbol: str | None = None,
+    benchmark_bar: str | None = None,
+    lookback: int = 50,
+    entry_z: float = 1.5,
+    exit_z: float = 0.5,
+) -> pd.Series:
+    """Pairs trading strategy using z-score of log spread versus benchmark asset."""
+    if benchmark_symbol is None:
+        logger.warning("Pairs strategy requires 'benchmark_symbol'; returning flat signals")
+        return pd.Series(0, index=df.index)
+
+    try:
+        from src.tools.data_loaders import get_polygon_bars  # Local import to avoid circular deps
+
+        bar = benchmark_bar or _infer_bar_from_index(df.index)
+        lookback_days = max(2, int(np.ceil((df.index[-1] - df.index[0]).total_seconds() / 86400.0)) + 2)
+        bench_df = get_polygon_bars(benchmark_symbol, bar, lookback_days=lookback_days)
+        bench_series = bench_df.get("close")
+        if bench_series is None or bench_series.empty:
+            raise ValueError("benchmark close series unavailable")
+        bench_series = bench_series.reindex(df.index, method="ffill")
+    except Exception as exc:
+        logger.warning(f"Failed to fetch benchmark {benchmark_symbol} for pairs strategy: {exc}")
+        return pd.Series(0, index=df.index)
+
+    spread = np.log(df["close"]) - np.log(bench_series)
+    rolling_mean = spread.rolling(lookback, min_periods=max(5, lookback // 2)).mean()
+    rolling_std = spread.rolling(lookback, min_periods=max(5, lookback // 2)).std()
+
+    zscore = (spread - rolling_mean) / rolling_std
+    signals = pd.Series(0, index=df.index)
+    position = 0
+
+    for ts in df.index:
+        z = zscore.loc[ts]
+        if np.isnan(z):
+            signals.loc[ts] = position
+            continue
+
+        if position == 0:
+            if z > entry_z:
+                position = -1
+            elif z < -entry_z:
+                position = 1
+        else:
+            if abs(z) < exit_z:
+                position = 0
+
+        signals.loc[ts] = position
+
+    return signals.fillna(0)
 
 
 # Strategy registry
@@ -214,9 +346,11 @@ STRATEGIES = {
     "bollinger_revert": bollinger_revert_strategy,
     "rsi": rsi_strategy,
     "keltner": keltner_strategy,
+    "pairs_mean_reversion": pairs_mean_reversion_strategy,
     
     # Volatile/special
     "atr_trend": atr_trend_strategy,
+    "atr_trailing_stop": atr_trailing_stop_strategy,
     
     # Baseline
     "carry": carry_strategy,
@@ -671,7 +805,8 @@ def test_multiple_strategies(
     logger.info(f"Optimizing strategies for {regime.value} regime")
     
     strategy_specs = get_strategies_for_regime(regime, config)
-    
+    strategy_specs = [spec for spec in strategy_specs if spec.get("enabled", True)]
+
     if not strategy_specs:
         logger.warning(f"No strategies configured for {regime.value}, using carry")
         strategy_specs = [{"name": "carry", "params": {}}]
@@ -851,4 +986,3 @@ def walk_forward_analysis(
     # TODO: Implement proper aggregation of OOS results
     logger.info("Walk-forward analysis complete.")
     return out_of_sample_results[-1]
-

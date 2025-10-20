@@ -13,6 +13,7 @@ from polygon import RESTClient
 from polygon.rest.models import Agg
 
 from src.core.utils import get_polygon_api_key
+from src.tools.microstructure import fetch_crypto_quotes
 
 logger = logging.getLogger(__name__)
 
@@ -113,9 +114,8 @@ class PolygonDataLoader:
             df = pd.DataFrame(data)
             df = df.set_index("timestamp")
 
-            # Remove duplicates and sort
-            df = df[~df.index.duplicated(keep="first")]
-            df = df.sort_index()
+            # Enhanced data validation and cleaning
+            df = self._validate_and_clean_data(df, symbol, bar)
 
             logger.info(f"Fetched {len(df)} bars for {symbol} {bar}")
             return df
@@ -123,6 +123,115 @@ class PolygonDataLoader:
         except Exception as e:
             logger.error(f"Error fetching from Polygon: {e}")
             return pd.DataFrame()
+
+    def _validate_and_clean_data(self, df: pd.DataFrame, symbol: str, bar: str) -> pd.DataFrame:
+        """
+        Comprehensive data validation and cleaning.
+
+        Args:
+            df: Raw DataFrame from Polygon
+            symbol: Trading symbol
+            bar: Timeframe string
+
+        Returns:
+            Cleaned and validated DataFrame
+        """
+        logger.info(f"Validating {symbol} {bar} data ({len(df)} bars)")
+
+        # 1. Remove duplicates
+        initial_len = len(df)
+        df = df[~df.index.duplicated(keep="first")]
+        df = df.sort_index()
+        duplicates_removed = initial_len - len(df)
+
+        # 2. Check for missing values
+        missing_pct = df.isnull().sum() / len(df) * 100
+        high_missing_cols = missing_pct[missing_pct > 5].index.tolist()  # >5% missing
+
+        if high_missing_cols:
+            logger.warning(f"High missing values in {symbol}: {dict(missing_pct[high_missing_cols])}")
+
+            # For critical columns, we might need to drop or interpolate
+            critical_cols = ['open', 'high', 'low', 'close', 'volume']
+            for col in critical_cols:
+                if col in high_missing_cols:
+                    if missing_pct[col] > 20:  # >20% missing is too much
+                        logger.error(f"Critical column {col} has {missing_pct[col]:.1f}% missing - data quality too poor")
+                        return pd.DataFrame()
+                    else:
+                        # Interpolate missing values for critical columns
+                        df[col] = df[col].interpolate(method='linear', limit_direction='both')
+
+        # 3. Price consistency checks
+        price_issues = (
+            (df['high'] < df['low']) |
+            (df['high'] < df['close']) |
+            (df['low'] > df['close']) |
+            (df['open'] <= 0) |
+            (df['high'] <= 0) |
+            (df['low'] <= 0) |
+            (df['close'] <= 0)
+        )
+
+        if price_issues.any():
+            logger.warning(f"Found {price_issues.sum()} price consistency issues in {symbol}")
+            # Fix obvious issues
+            df.loc[df['high'] < df['low'], 'high'] = df.loc[df['high'] < df['low'], 'low']
+            df.loc[df['high'] < df['close'], 'high'] = df.loc[df['high'] < df['close'], 'close']
+            df.loc[df['low'] > df['close'], 'low'] = df.loc[df['low'] > df['close'], 'close']
+
+        # 4. Volume validation
+        if 'volume' in df.columns:
+            negative_volume = (df['volume'] < 0).sum()
+            if negative_volume > 0:
+                logger.warning(f"Found {negative_volume} negative volume entries in {symbol}")
+                df.loc[df['volume'] < 0, 'volume'] = 0
+
+        # 5. Time consistency checks
+        expected_freq = self._get_expected_frequency(bar)
+        if expected_freq:
+            time_diffs = df.index.to_series().diff().dt.total_seconds()
+            gaps = time_diffs[time_diffs > expected_freq * 2]  # More than 2x expected interval
+
+            if len(gaps) > 0:
+                logger.warning(f"Found {len(gaps)} data gaps in {symbol} {bar}")
+                # Log gap information for debugging
+                gap_info = []
+                for idx, gap in gaps.items():
+                    gap_info.append(f"{idx}: {gap//60}min gap")
+                logger.info(f"Gap details: {gap_info[:5]}")  # Show first 5 gaps
+
+        # 6. Outlier detection (basic)
+        if len(df) > 20:  # Need sufficient data for outlier detection
+            price_change = df['close'].pct_change()
+            outliers = price_change[abs(price_change) > 0.5]  # >50% price moves
+
+            if len(outliers) > len(df) * 0.1:  # >10% outliers
+                logger.warning(f"High outlier percentage in {symbol}: {len(outliers)}/{len(df)} ({len(outliers)/len(df)*100:.1f}%)")
+
+        # 7. Final validation summary
+        final_missing = df.isnull().sum().sum()
+        if final_missing > 0:
+            logger.warning(f"Final dataset has {final_missing} missing values after cleaning")
+
+        cleaned_len = len(df)
+        if duplicates_removed > 0:
+            logger.info(f"Data cleaning: removed {duplicates_removed} duplicates, {cleaned_len} bars remaining")
+
+        return df
+
+    def _get_expected_frequency(self, bar: str) -> Optional[int]:
+        """Get expected time interval in seconds for bar type"""
+        freq_map = {
+            '1m': 60,
+            '5m': 300,
+            '15m': 900,
+            '30m': 1800,
+            '1h': 3600,
+            '4h': 14400,
+            '1d': 86400,
+        }
+        return freq_map.get(bar)
 
     def _parse_bar(self, bar: str) -> tuple[int, str]:
         """Parse bar string (e.g., '15m', '1h', '1d') into multiplier and timespan"""
@@ -204,4 +313,39 @@ def get_polygon_bars(
     """Convenience function to get Polygon bars"""
     loader = PolygonDataLoader()
     return loader.get_bars(symbol, bar, start, end, lookback_days)
+
+
+def fetch_quotes_data(
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    lookback_days: int = 30
+) -> pd.DataFrame:
+    """
+    Fetch crypto quotes data from Polygon for microstructure analysis.
+
+    Args:
+        symbol: Crypto symbol (e.g., 'X:BTCUSD')
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+        lookback_days: Days to look back (alternative to date range)
+
+    Returns:
+        DataFrame with bid, ask, bid_size, ask_size data
+    """
+    # Get API key from config
+    api_key = get_polygon_api_key()
+    if not api_key:
+        logger.warning("No Polygon API key found")
+        return pd.DataFrame()
+
+    # Calculate date range if not provided
+    if not start_date or not end_date:
+        end = datetime.now()
+        start = end - timedelta(days=lookback_days)
+        start_date = start.strftime('%Y-%m-%d')
+        end_date = end.strftime('%Y-%m-%d')
+
+    # Fetch quotes data
+    return fetch_crypto_quotes(symbol, start_date, end_date, api_key)
 

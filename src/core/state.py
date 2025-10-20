@@ -16,6 +16,7 @@ from src.core.schemas import (
     ExecReport,
     FeatureBundle,
     JudgeReport,
+    MicrostructureFeatures,
     RegimeDecision,
     StrategySpec,
     Tier,
@@ -50,6 +51,11 @@ class PipelineState(TypedDict, total=False):
     ccm_mt: Optional[CCMSummary]
     ccm_st: Optional[CCMSummary]
 
+    # === Microstructure Analysis (per tier) ===
+    microstructure_lt: Optional[MicrostructureFeatures]
+    microstructure_mt: Optional[MicrostructureFeatures]
+    microstructure_st: Optional[MicrostructureFeatures]
+
     # === Regime (per tier) ===
     regime_lt: Optional[RegimeDecision]
     regime_mt: Optional[RegimeDecision]
@@ -68,6 +74,10 @@ class PipelineState(TypedDict, total=False):
     # === Strategy Comparison (all tested strategies) ===
     strategy_comparison_mt: Optional[Dict[str, BacktestResult]]
     strategy_comparison_st: Optional[Dict[str, BacktestResult]]
+    
+    # === Strategy Optimization Results ===
+    optimization_results_mt: Optional[Dict[str, Any]]
+    optimization_results_st: Optional[Dict[str, Any]]
     
     # === Primary Execution Tier ===
     primary_execution_tier: Optional[str]  # "MT" or "ST" (Phase 2 with L2 data)
@@ -95,8 +105,14 @@ class PipelineState(TypedDict, total=False):
     # === Config ===
     config: Optional[Dict[str, Any]]
 
+    # === Dual-LLM Research ===
+    dual_llm_research: Optional[Dict[str, Any]]
+
     # === Progress Tracking ===
     progress: Optional[PipelineProgress]
+    
+    # === Technical Levels ===
+    technical_levels: Optional[Dict[str, Any]]
     
     # === Messages (LangGraph message passing) ===
     messages: Annotated[list, add_messages]
@@ -117,6 +133,7 @@ def create_initial_state(
         config=config or {},
         progress=progress,
         messages=[],
+        technical_levels=None,
         # All other fields default to None
         data_lt=None,
         data_mt=None,
@@ -140,5 +157,5 @@ def create_initial_state(
         judge_report=None,
         exec_report=None,
         artifacts_dir=None,
+        dual_llm_research=None,
     )
-

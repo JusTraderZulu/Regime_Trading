@@ -77,6 +77,32 @@ class SignalRow(BaseModel):
         default=None,
         description="Strategy parameters as JSON string (e.g., '{\"fast\": 20, \"slow\": 50}')"
     )
+
+    # Microstructure analysis data
+    microstructure_data_quality: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="Microstructure data quality score (0-1)"
+    )
+    microstructure_market_efficiency: Optional[str] = Field(
+        default=None,
+        description="Market efficiency assessment (high/moderate/low/unknown)"
+    )
+    microstructure_liquidity: Optional[str] = Field(
+        default=None,
+        description="Liquidity assessment (high/moderate/low/unknown)"
+    )
+    microstructure_bid_ask_spread_bps: Optional[float] = Field(
+        default=None, ge=0.0,
+        description="Bid-ask spread in basis points"
+    )
+    microstructure_ofi_imbalance: Optional[float] = Field(
+        default=None,
+        description="Order flow imbalance indicator"
+    )
+    microstructure_microprice: Optional[float] = Field(
+        default=None, gt=0.0,
+        description="Microprice (weighted average of bid/ask)"
+    )
     
     @field_validator("time")
     @classmethod
@@ -126,6 +152,13 @@ class SignalRow(BaseModel):
             "funding_apr": f"{self.funding_apr:.4f}" if self.funding_apr is not None else "",
             "strategy_name": self.strategy_name or "",
             "strategy_params": self.strategy_params or "",
+            # Microstructure data
+            "microstructure_data_quality": f"{self.microstructure_data_quality:.3f}" if self.microstructure_data_quality is not None else "",
+            "microstructure_market_efficiency": self.microstructure_market_efficiency or "",
+            "microstructure_liquidity": self.microstructure_liquidity or "",
+            "microstructure_bid_ask_spread_bps": f"{self.microstructure_bid_ask_spread_bps:.2f}" if self.microstructure_bid_ask_spread_bps is not None else "",
+            "microstructure_ofi_imbalance": f"{self.microstructure_ofi_imbalance:.4f}" if self.microstructure_ofi_imbalance is not None else "",
+            "microstructure_microprice": f"{self.microstructure_microprice:.2f}" if self.microstructure_microprice is not None else "",
         }
     
     class Config:

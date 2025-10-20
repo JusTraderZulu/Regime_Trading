@@ -1,4 +1,4 @@
-.PHONY: venv install lint fmt test run telegram clean help
+.PHONY: venv install lint fmt test run telegram portfolio clean help
 
 PYTHON := python3.11
 VENV := .venv
@@ -14,6 +14,7 @@ help:
 	@echo "  make fmt         - Format code (black, ruff --fix)"
 	@echo "  make test        - Run pytest"
 	@echo "  make run         - Run CLI (SYMBOL=BTC-USD MODE=fast)"
+	@echo "  make portfolio   - Analyze crypto portfolio (BTC, ETH, SOL, XRP)"
 	@echo "  make telegram    - Start Telegram bot"
 	@echo "  make clean       - Remove cache and temp files"
 
@@ -42,6 +43,10 @@ test:
 
 run:
 	$(BIN)/python -m src.ui.cli run --symbol $(SYMBOL) --mode $(MODE)
+
+portfolio:
+	@echo "🔍 Analyzing crypto portfolio..."
+	./analyze_portfolio.sh
 
 telegram:
 	$(BIN)/python -m src.executors.telegram_bot

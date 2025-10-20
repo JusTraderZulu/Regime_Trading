@@ -1,5 +1,31 @@
 # Crypto Regime Analysis System Configuration
 
+# =============================================================================
+# Execution Configuration (Live Trading)
+# =============================================================================
+execution:
+  # Alpaca (Paper + Live Trading)
+  alpaca:
+    enabled: true
+    api_key: "PKPTS4BAZFLOZETRXZQ2SX2CJ7"
+    api_secret: "B19BqEueb9E3nYc6B1aZvRWhYsVgyFQXXs3ZyV9W92m6"
+  
+  # Coinbase (Live Only)
+  coinbase:
+    enabled: true
+    api_key: "organizations/96b7553d-65cc-4ea7-9846-6638c0ebc9c9/apiKeys/3deb12b7-ccf6-41b8-96c4-1000a27779c6"
+    api_secret: "-----BEGIN EC PRIVATE KEY-----\\nMHcCAQEEIOsodBddfKIVEPwgAA3FAZYLmE0QPQGANGzRafNTpKhmoAoGCCqGSM49\\nAwEHoUQDQgAEaXpKWikKqdCrnElQwvTS5T1RRBWRloWyOoKINPo9TNswhU0j3YKi\\nfpb+gnifTTaEJkt9BmXxqWvZBarsUz35hA==\\n-----END EC PRIVATE KEY-----\\n"
+  
+  # Risk Management Limits
+  max_position_size_pct: 0.20  # Max 20% per position
+  max_exposure_pct: 0.95       # Max 95% total exposure
+  max_positions: 10            # Max number of positions
+  min_confidence: 0.50         # Min 50% confidence to trade
+
+# =============================================================================
+# Analysis Configuration
+# =============================================================================
+
 # Symbols to analyze
 symbols:
   # Crypto
@@ -48,6 +74,34 @@ tests:
 ccm:
   enabled: false  # Disabled - insufficient data access
   tiers: ["LT", "MT", "ST"]
+
+# Market Intelligence Agent configuration (Microstructure Analysis)
+market_intelligence:
+  enabled: true  # Enable microstructure analysis
+  tiers: ["ST"]  # Focus on short-term for microstructure
+
+  # Microstructure features to compute
+  features:
+    bid_ask_spread: true
+    order_flow_imbalance: true
+    microprice: true
+    price_impact: true
+    trade_flow: true
+
+  # OFI (Order Flow Imbalance) parameters
+  ofi:
+    window_sizes: [10, 25, 50]  # Multiple timeframes for OFI
+    threshold: 0.1  # Minimum threshold for significant imbalance
+
+  # Data requirements
+  data:
+    min_tick_bars: 1000  # Minimum tick bars needed for reliable microstructure
+    max_spread_bps: 50  # Maximum spread in basis points to consider valid
+
+  # LLM providers for dual-agent system
+  llm:
+    context_provider: "perplexity"  # For real-time market data
+    analytical_provider: "openai"   # For deep analysis
   
   # Context symbols for cross-asset analysis
   context_symbols:
@@ -115,6 +169,14 @@ backtest:
         params:
           period: [20]
           atr_mult: [2.0]
+      - name: pairs_mean_reversion
+        enabled: false  # Enable and set benchmark_symbol per asset to activate
+        params:
+          benchmark_symbol: ["X:ETHUSD"]
+          benchmark_bar: ["4h"]
+          lookback: [60]
+          entry_z: [1.5]
+          exit_z: [0.5]
     random:
       - name: carry
         params: {}
@@ -127,6 +189,11 @@ backtest:
       - name: donchian
         params:
           lookback: [20, 30]
+      - name: atr_trailing_stop
+        params:
+          ema_period: [21, 34]
+          atr_period: [14]
+          atr_mult: [2.5, 3.0]
 
 # Regime classification thresholds
 # Adjusted for crypto market characteristics (more lenient)
@@ -146,6 +213,16 @@ regime:
     acf: 0.20        # 20% - autocorrelation pattern (NEW!)
     adf: 0.15        # 15% - stationarity check
     volatility: 0.05 # 5% - market condition
+  volatility_signal:
+    realized_vol_threshold: 0.03  # Fallback threshold when GARCH unavailable
+    garch_high_ratio: 1.25        # High-vol threshold supporting trend classification
+    garch_low_ratio: 0.85         # Low-vol threshold supporting mean reversion
+
+  hysteresis:
+    enabled: true              # Require confirmation before regime flips
+    confirmation_bars: 2       # Number of consecutive detections needed
+    use_transition_state: true # Emit 'uncertain' regime while awaiting confirmation
+    transition_confidence_cap: 0.35  # Cap confidence when in transition
 
 # Enhanced Tier Configuration
 tiers:
@@ -177,7 +254,22 @@ transition:
 
 # Volatility Clustering
 volatility:
+  garch:
+    enabled: true
+    min_samples: 200
+    high_vol_ratio: 1.25
+    low_vol_ratio: 0.85
+
+technical_levels:
+  pivot_lookback: 20
+  donchian_lookback: 20
+  atr_period: 14
   arch_lm_lags: 5  # Lags for ARCH-LM test
+  garch:
+    enabled: true
+    min_samples: 200
+    high_vol_ratio: 1.25
+    low_vol_ratio: 0.85
 
 # Report Generation
 report:
@@ -224,7 +316,6 @@ lean:
   signals_dir: "data/signals"
 
 qc:
-  auto_submit: true  # Enable to automatically submit backtests to QC Cloud
+  auto_submit: false  # Disable QC auto-submit for now (set true when ready)
   wait_for_results: false  # Set to true to wait (adds 5-10 min), false to run in background
   timeout_seconds: 300  # Max wait time if wait_for_results = true
-

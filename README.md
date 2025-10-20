@@ -188,7 +188,58 @@ The script automatically loads API keys and shows where results are saved!
 
 ---
 
-### CLI Interface
+## 🧭 PWA Command Center (Research & Trading)
+
+Unified commands the PWA will surface. You can run these locally today via the CLIs shown.
+
+### Analyze (single asset)
+- Analyze asset (fast/thorough):
+```bash
+python -m src.ui.cli run --symbol X:BTCUSD --mode fast
+python -m src.ui.cli run --symbol X:ETHUSD --mode thorough
+```
+- Latest report: `artifacts/<SYMBOL>/latest/report.md`
+- Features (with data quality): `artifacts/<SYMBOL>/latest/features_*.json`
+
+### Portfolio (multi-asset)
+- Analyze portfolio (predefined basket):
+```bash
+make portfolio
+```
+- Portfolio report: `artifacts/portfolio/latest/report.md`
+
+### Signals
+- List latest signals (for execution/Lean): `data/signals/latest/signals.csv`
+
+### Execution
+- Status (paper/live):
+```bash
+python -m src.execution.cli status --paper
+```
+- Execute latest signals (paper or dry run):
+```bash
+python -m src.execution.cli execute --signals data/signals/latest/signals.csv --paper
+python -m src.execution.cli execute --signals data/signals/latest/signals.csv --dry-run
+```
+- Close a position:
+```bash
+python -m src.execution.cli close --symbol X:BTCUSD --paper
+```
+
+### Data Ops
+- Quick data health check (run analysis; validation baked-in):
+```bash
+python -m src.ui.cli run --symbol X:XRPUSD --mode fast
+# See features_*.json for data_quality_score/completeness
+```
+- Quotes fetch for microstructure is automatically attempted for crypto; saved under `data/quotes/` when available.
+
+### REST API (preview)
+- Planned endpoints for the PWA backend: `/api/analysis/run`, `/api/analysis/{symbol}/latest/report`, `/api/portfolio/analyze`, `/api/execution/*`, `/api/data/*` (see `docs/REFERENCE_PWA.md`).
+
+---
+
+## CLI Interface
 
 #### Quick Analysis (Fast Mode)
 

@@ -29,6 +29,13 @@ CSV_HEADERS = [
     "funding_apr",
     "strategy_name",
     "strategy_params",
+    # Microstructure data
+    "microstructure_data_quality",
+    "microstructure_market_efficiency",
+    "microstructure_liquidity",
+    "microstructure_bid_ask_spread_bps",
+    "microstructure_ofi_imbalance",
+    "microstructure_microprice",
 ]
 
 

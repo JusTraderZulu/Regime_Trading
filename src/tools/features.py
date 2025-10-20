@@ -17,6 +17,144 @@ from src.core.schemas import FeatureBundle, Tier
 logger = logging.getLogger(__name__)
 
 
+def _validate_price_data(close_series: pd.Series, symbol: str, tier: Tier) -> Dict:
+    """
+    Comprehensive validation of price data before feature computation.
+
+    Args:
+        close_series: Close price series to validate
+        symbol: Asset symbol for logging
+        tier: Market tier for context
+
+    Returns:
+        Dict with 'valid' boolean and 'reason' string
+    """
+    # 1. Check for empty data
+    if close_series.empty:
+        return {'valid': False, 'reason': 'Empty price series'}
+
+    # 2. Check minimum sample size
+    if len(close_series) < 20:  # Need at least 20 points for basic analysis
+        return {'valid': False, 'reason': f'Insufficient data: {len(close_series)} samples (minimum 20)'}
+
+    # 3. Check for all NaN values
+    if close_series.isna().all():
+        return {'valid': False, 'reason': 'All price values are NaN'}
+
+    # 4. Check for zero/negative prices
+    negative_prices = (close_series <= 0).sum()
+    if negative_prices > 0:
+        return {'valid': False, 'reason': f'{negative_prices} zero/negative price values found'}
+
+    # 5. Check for excessive missing values (>20%)
+    missing_pct = close_series.isna().sum() / len(close_series) * 100
+    if missing_pct > 20:
+        return {'valid': False, 'reason': f'Excessive missing values: {missing_pct:.1f}% (max 20%)'}
+
+    # 6. Check for price stability (too many identical values)
+    unique_prices = close_series.nunique()
+    if unique_prices < 5 and len(close_series) > 50:  # Very little price movement
+        return {'valid': False, 'reason': f'Insufficient price variation: {unique_prices} unique values'}
+
+    # 7. Check for extreme volatility (>1000% daily moves)
+    if len(close_series) > 1:
+        returns = close_series.pct_change().dropna()
+        extreme_moves = (abs(returns) > 10).sum()  # >1000% moves
+        if extreme_moves > len(returns) * 0.05:  # >5% extreme moves
+            return {'valid': False, 'reason': f'Excessive volatility: {extreme_moves} extreme moves (>1000%)'}
+
+    # 8. Check for time consistency (basic)
+    if hasattr(close_series.index, 'freq'):
+        if close_series.index.freq is None:
+            # Check if timestamps are roughly evenly spaced
+            time_diffs = close_series.index.to_series().diff().dt.total_seconds()
+            if len(time_diffs) > 1:
+                std_diff = time_diffs.std()
+                mean_diff = time_diffs.mean()
+                if std_diff > mean_diff * 0.5:  # High variation in time intervals
+                    return {'valid': False, 'reason': 'Irregular time intervals detected'}
+
+    # Data passes all validation checks
+    return {'valid': True, 'reason': 'Data validation passed'}
+
+
+def _calculate_data_quality_score(close_series: pd.Series, returns_arr: np.ndarray, n_samples: int) -> float:
+    """
+    Calculate overall data quality score (0-1).
+
+    Args:
+        close_series: Original price series
+        returns_arr: Returns array
+        n_samples: Number of return samples
+
+    Returns:
+        Quality score between 0 and 1
+    """
+    if n_samples < 20:
+        return 0.0
+
+    score = 1.0
+
+    # 1. Sample size penalty (need at least 100 for good analysis)
+    if n_samples < 100:
+        score *= min(n_samples / 100, 1.0) * 0.8 + 0.2
+
+    # 2. Missing data penalty
+    missing_pct = close_series.isna().sum() / len(close_series) * 100
+    if missing_pct > 0:
+        score *= max(1.0 - missing_pct / 20, 0.5)  # Penalize >20% missing
+
+    # 3. Outlier penalty
+    if len(returns_arr) > 0:
+        outlier_pct = (np.abs(returns_arr) > 0.5).sum() / len(returns_arr)  # >50% moves
+        if outlier_pct > 0.1:  # >10% outliers
+            score *= max(1.0 - outlier_pct * 2, 0.5)  # Penalize heavily
+
+    # 4. Price stability bonus (some variation needed for meaningful analysis)
+    if len(close_series) > 20:
+        unique_pct = close_series.nunique() / len(close_series)
+        if unique_pct < 0.1:  # <10% unique values (too stable)
+            score *= 0.7  # Penalize lack of variation
+
+    return max(score, 0.0)
+
+
+def _calculate_data_completeness(close_series: pd.Series) -> float:
+    """
+    Calculate data completeness percentage.
+
+    Args:
+        close_series: Price series
+
+    Returns:
+        Completeness score (0-1)
+    """
+    if close_series.empty:
+        return 0.0
+
+    # Completeness = 1 - (missing / total)
+    missing_pct = close_series.isna().sum() / len(close_series)
+    return 1.0 - missing_pct
+
+
+def _calculate_outlier_percentage(returns_arr: np.ndarray) -> float:
+    """
+    Calculate percentage of outlier returns.
+
+    Args:
+        returns_arr: Returns array
+
+    Returns:
+        Outlier percentage (0-1)
+    """
+    if len(returns_arr) == 0:
+        return 0.0
+
+    # Define outliers as |return| > 50%
+    outliers = np.abs(returns_arr) > 0.5
+    return outliers.sum() / len(returns_arr)
+
+
 # ============================================================================
 # Basic transformations
 # ============================================================================
@@ -403,6 +541,111 @@ def compute_vol_stats(returns: np.ndarray) -> Dict[str, float]:
 
 
 # ============================================================================
+# GARCH-based volatility analytics
+# ============================================================================
+
+
+def _periods_per_year_from_bar(bar: str) -> float:
+    """Approximate number of periods per year for a given bar size."""
+    if not bar:
+        return 365.0
+
+    bar = bar.lower().strip()
+
+    try:
+        if bar.endswith("m"):
+            minutes = int(bar[:-1])
+        elif bar.endswith("h"):
+            minutes = int(bar[:-1]) * 60
+        elif bar.endswith("d"):
+            minutes = int(bar[:-1]) * 24 * 60
+        else:
+            return 365.0
+    except ValueError:
+        return 365.0
+
+    if minutes <= 0:
+        return 365.0
+
+    periods_per_day = 1440 / minutes
+    return periods_per_day * 365.0
+
+
+def compute_garch_metrics(
+    returns: pd.Series,
+    bar: str,
+    config: Dict,
+) -> Dict[str, float | str | None]:
+    """
+    Fit a GARCH(1,1) model to returns and derive volatility regime metrics.
+
+    Returns:
+        Dict with conditional volatility statistics.
+    """
+    garch_cfg = config.get("volatility", {}).get("garch", {})
+    if not garch_cfg.get("enabled", True):
+        raise ValueError("GARCH disabled via config")
+
+    min_samples = garch_cfg.get("min_samples", 200)
+    if len(returns) < min_samples:
+        raise ValueError(f"Insufficient samples for GARCH ({len(returns)} < {min_samples})")
+
+    # Import lazily to avoid heavy dependency at module import time
+    try:
+        from arch import arch_model  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError("arch package is required for GARCH analytics") from exc
+
+    scaled_returns = returns * 100  # stabilize optimization
+    scaled_returns = scaled_returns.dropna()
+
+    if scaled_returns.std() == 0 or len(scaled_returns) < min_samples:
+        raise ValueError("Degenerate returns for GARCH estimation")
+
+    model = arch_model(scaled_returns, vol="GARCH", p=1, q=1, rescale=False, dist="normal")
+    fit_kwargs = {"disp": "off"}
+    tolerance = garch_cfg.get("tol")
+    if tolerance is not None:
+        fit_kwargs["tol"] = tolerance
+
+    result = model.fit(**fit_kwargs)
+
+    cond_vol = result.conditional_volatility / 100.0  # back to return units
+    latest_vol = float(cond_vol.iloc[-1])
+    mean_vol = float(cond_vol.mean())
+    vol_ratio = latest_vol / mean_vol if mean_vol > 0 else None
+
+    alpha = float(result.params.get("alpha[1]", 0.0))
+    beta = float(result.params.get("beta[1]", 0.0))
+    persistence = alpha + beta
+
+    annualized_vol = None
+    periods_per_year = _periods_per_year_from_bar(bar)
+    if periods_per_year > 0:
+        annualized_vol = latest_vol * np.sqrt(periods_per_year)
+
+    high_ratio = garch_cfg.get("high_vol_ratio", 1.25)
+    low_ratio = garch_cfg.get("low_vol_ratio", 0.85)
+    regime = None
+    if vol_ratio is not None:
+        if vol_ratio >= high_ratio:
+            regime = "high"
+        elif vol_ratio <= low_ratio:
+            regime = "low"
+        else:
+            regime = "neutral"
+
+    return {
+        "garch_volatility": latest_vol,
+        "garch_volatility_annualized": annualized_vol,
+        "garch_mean_volatility": mean_vol,
+        "garch_vol_ratio": vol_ratio,
+        "garch_persistence": persistence,
+        "garch_regime": regime,
+    }
+
+
+# ============================================================================
 # Main Feature Bundle Computation
 # ============================================================================
 
@@ -431,6 +674,40 @@ def compute_feature_bundle(
     """
     if timestamp is None:
         timestamp = datetime.utcnow()
+
+    # Enhanced data validation before feature computation
+    validation_result = _validate_price_data(close_series, symbol, tier)
+    if not validation_result['valid']:
+        logger.error(f"Data validation failed for {symbol} {tier}: {validation_result['reason']}")
+        # Return minimal valid features
+        return FeatureBundle(
+            tier=tier,
+            symbol=symbol,
+            bar=bar,
+            timestamp=timestamp,
+            n_samples=0,
+            hurst_rs=0.5,
+            hurst_dfa=0.5,
+            vr_statistic=1.0,
+            vr_p_value=1.0,
+            vr_detail={},
+            adf_statistic=0.0,
+            adf_p_value=1.0,
+            returns_vol=0.01,
+            returns_skew=0.0,
+            returns_kurt=3.0,
+            half_life=0.0,
+            acf1=0.0,
+            acf_regime='unknown',
+            vol_clustering=False,
+            rolling_hurst_mu=0.5,
+            rolling_hurst_sigma=0.1,
+            distribution_stability=0.5,
+            data_quality_score=0.0,
+            validation_warnings=[validation_result['reason']],
+            data_completeness=0.0,
+            outlier_percentage=0.0
+        )
 
     # Compute returns
     returns = log_returns(close_series).dropna()
@@ -494,6 +771,12 @@ def compute_feature_bundle(
 
     # Volatility stats
     vol_stats = compute_vol_stats(returns_arr)
+    garch_metrics = {}
+    
+    try:
+        garch_metrics = compute_garch_metrics(returns, bar, config)
+    except Exception as e:
+        logger.debug(f"GARCH analytics skipped for {symbol} {tier}: {e}")
     
     # Enhanced analytics (new - optional for backward compatibility)
     vr_multi_results = None
@@ -580,5 +863,15 @@ def compute_feature_bundle(
         rolling_hurst_mean=rolling_h_mean,
         rolling_hurst_std=rolling_h_std,
         skew_kurt_stability=skew_kurt_stab,
+        # Data quality metrics
+        data_quality_score=_calculate_data_quality_score(close_series, returns_arr, n_samples),
+        validation_warnings=[],
+        data_completeness=_calculate_data_completeness(close_series),
+        outlier_percentage=_calculate_outlier_percentage(returns_arr),
+        garch_volatility=garch_metrics.get("garch_volatility"),
+        garch_volatility_annualized=garch_metrics.get("garch_volatility_annualized"),
+        garch_mean_volatility=garch_metrics.get("garch_mean_volatility"),
+        garch_vol_ratio=garch_metrics.get("garch_vol_ratio"),
+        garch_persistence=garch_metrics.get("garch_persistence"),
+        garch_regime=garch_metrics.get("garch_regime"),
     )
-

@@ -26,6 +26,19 @@ This document provides a complete and detailed overview of the three primary dev
 ### A-5: Reporting
 -   **Summarizer Update**: The `summarizer.py` agent will be updated to include a "Tape Health" section in the final markdown report, presenting the new insights.
 
+### A-6: Dual-LLM Contradictor Implementation
+
+-   **Goal**: To significantly increase the robustness and depth of the qualitative analysis by implementing a multi-agent "debate" pattern. This will leverage the distinct strengths of different LLM providers (e.g., Perplexity for real-time search, OpenAI for deep reasoning).
+-   **Refactor LLM Client**: Update `src/core/llm.py` to be a provider-aware factory, capable of initializing clients for OpenAI, Perplexity, and Hugging Face on demand.
+-   **Multi-Agent Research**: Modify the `summarizer` agent to orchestrate two parallel research tasks:
+    1.  **Real-time Context Agent (Perplexity)**: Gathers up-to-the-minute market news, sentiment, and event data.
+    2.  **Analytical Agent (OpenAI/GPT-4)**: Provides a deeper, model-based analysis of the quantitative data provided.
+-   **Upgrade Judge Agent**: The `judge` agent's role will be elevated. It will receive the outputs from both research agents and be tasked with:
+    1.  Comparing the two analyses.
+    2.  Identifying key agreements, disagreements, and unique insights from each.
+    3.  Synthesizing a final, more nuanced and reliable conclusion for the report.
+-   **Configuration**: Update `config/settings.yaml` to allow specifying which LLM provider to use for each role (`context_provider`, `analytical_provider`).
+
 ---
 
 ## Workstream B: Multi-Tenant Portfolio Manager Agent

@@ -78,6 +78,18 @@ class FeatureBundle(BaseModel):
     returns_skew: float
     returns_kurt: float
 
+    # Data quality and validation
+    data_quality_score: float = Field(ge=0.0, le=1.0, description="Overall data quality score (0-1)")
+    validation_warnings: List[str] = Field(default_factory=list, description="Data validation warnings")
+    data_completeness: float = Field(ge=0.0, le=1.0, description="Percentage of expected data points available")
+    outlier_percentage: float = Field(ge=0.0, le=1.0, description="Percentage of outlier data points")
+    garch_volatility: Optional[float] = Field(default=None, description="Latest conditional volatility from GARCH(1,1)")
+    garch_volatility_annualized: Optional[float] = Field(default=None, description="Annualized GARCH conditional volatility")
+    garch_mean_volatility: Optional[float] = Field(default=None, description="Average conditional volatility over sample")
+    garch_vol_ratio: Optional[float] = Field(default=None, description="Ratio of latest GARCH volatility to sample mean")
+    garch_persistence: Optional[float] = Field(default=None, description="GARCH persistence (alpha + beta)")
+    garch_regime: Optional[str] = Field(default=None, description="Qualitative volatility regime classification from GARCH")
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -96,6 +108,10 @@ class FeatureBundle(BaseModel):
                 "returns_vol": 0.025,
                 "returns_skew": -0.15,
                 "returns_kurt": 3.5,
+                "garch_volatility": 0.018,
+                "garch_volatility_annualized": 0.45,
+                "garch_vol_ratio": 1.35,
+                "garch_regime": "high",
             }
         }
 
@@ -175,6 +191,15 @@ class RegimeDecision(BaseModel):
     macro_coupling: Optional[float] = None
 
     rationale: str = Field(description="Explanation for regime classification")
+    base_label: Optional[RegimeLabel] = Field(
+        default=None, description="Raw label prior to hysteresis/confirmation filtering"
+    )
+    hysteresis_applied: Optional[bool] = Field(
+        default=False, description="True if hysteresis adjusted the final label"
+    )
+    confirmation_streak: Optional[int] = Field(
+        default=None, description="Current confirmation streak for regime transitions"
+    )
 
     @field_validator("confidence")
     @classmethod
@@ -372,6 +397,125 @@ class ContradictorReport(BaseModel):
 
 
 # ============================================================================
+# Microstructure Features (Market Intelligence Agent)
+# ============================================================================
+
+
+class MicrostructureSpread(BaseModel):
+    """Bid-ask spread metrics"""
+    spread_mean_bps: float
+    spread_median_bps: float
+    spread_std_bps: float
+    spread_min_bps: float
+    spread_max_bps: float
+    effective_spread_bps: float
+
+
+class MicrostructureOFI(BaseModel):
+    """Order Flow Imbalance metrics for a specific window"""
+    ofi_mean: float
+    ofi_std: float
+    ofi_autocorr: float
+    ofi_positive_ratio: float
+    ofi_negative_ratio: float
+    ofi_significant_ratio: float
+
+
+class MicrostructureTradeFlow(BaseModel):
+    """Trade flow and execution metrics"""
+    avg_trade_size: float
+    trade_size_skew: float
+    large_trade_ratio: float
+    price_impact_ratio: float
+    trade_frequency: float
+
+
+class MicrostructurePriceImpact(BaseModel):
+    """Price impact metrics"""
+    price_impact_mean: float
+    price_impact_median: float
+    price_impact_std: float
+    price_impact_max: float
+    volume_impact_corr: float
+
+
+class MicrostructureSummary(BaseModel):
+    """Overall microstructure assessment"""
+    features_computed: int
+    data_quality_score: float
+    market_efficiency: str
+    liquidity_assessment: str
+
+
+class MicrostructureFeatures(BaseModel):
+    """Complete microstructure analysis results for a single tier"""
+
+    tier: Tier
+    symbol: str
+    timestamp: datetime
+    n_samples: int
+
+    # Spread metrics
+    bid_ask_spread: Optional[MicrostructureSpread] = None
+
+    # Order Flow Imbalance (OFI) by window size
+    order_flow_imbalance: Optional[Dict[int, MicrostructureOFI]] = None
+
+    # Microprice data
+    microprice: Optional[Dict[str, float]] = None  # Statistical summary
+
+    # Price impact metrics
+    price_impact: Optional[MicrostructurePriceImpact] = None
+
+    # Trade flow analysis
+    trade_flow: Optional[MicrostructureTradeFlow] = None
+
+    # Overall assessment
+    summary: Optional[MicrostructureSummary] = None
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "tier": "ST",
+                "symbol": "BTC-USD",
+                "timestamp": "2024-01-15T12:00:00Z",
+                "n_samples": 1000,
+                "bid_ask_spread": {
+                    "spread_mean_bps": 2.5,
+                    "spread_median_bps": 2.1,
+                    "spread_std_bps": 1.8,
+                    "spread_min_bps": 0.5,
+                    "spread_max_bps": 15.2,
+                    "effective_spread_bps": 2.8
+                },
+                "order_flow_imbalance": {
+                    "10": {
+                        "ofi_mean": 0.05,
+                        "ofi_std": 0.32,
+                        "ofi_autocorr": 0.15,
+                        "ofi_positive_ratio": 0.52,
+                        "ofi_negative_ratio": 0.48,
+                        "ofi_significant_ratio": 0.35
+                    }
+                },
+                "trade_flow": {
+                    "avg_trade_size": 1.2,
+                    "trade_size_skew": 2.1,
+                    "large_trade_ratio": 0.15,
+                    "price_impact_ratio": 1.8,
+                    "trade_frequency": 85.5
+                },
+                "summary": {
+                    "features_computed": 3,
+                    "data_quality_score": 0.75,
+                    "market_efficiency": "high",
+                    "liquidity_assessment": "moderate"
+                }
+            }
+        }
+
+
+# ============================================================================
 # Executive Report
 # ============================================================================
 
@@ -446,4 +590,3 @@ class JudgeReport(BaseModel):
                 "timestamp": "2024-01-15T12:00:00Z",
             }
         }
-
