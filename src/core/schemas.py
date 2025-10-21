@@ -170,7 +170,7 @@ class StochasticForecastResult(BaseModel):
 
 
 class CCMPair(BaseModel):
-    """CCM coupling between two assets"""
+    """Legacy CCM coupling between two assets (deprecated)"""
 
     pair: str = Field(description="Asset pair, e.g. BTC-ETH")
     skill_xy: float = Field(ge=0.0, le=1.0, description="CCM skill X→Y")
@@ -178,14 +178,36 @@ class CCMPair(BaseModel):
     lead: str = Field(description="Lead relationship: 'x_leads', 'y_leads', 'symmetric', 'weak'")
 
 
+class CCMPairResult(BaseModel):
+    """CCM output for a directed pair with interpretation metadata."""
+
+    asset_a: str
+    asset_b: str
+    rho_ab: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="CCM skill A→B")
+    rho_ba: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="CCM skill B→A")
+    delta_rho: Optional[float] = Field(default=None, description="Directional edge (rho_ab - rho_ba)")
+    interpretation: str = Field(
+        description="Relationship classification: 'A_leads_B' | 'B_leads_A' | 'symmetric' | 'weak'"
+    )
+
+
 class CCMSummary(BaseModel):
-    """Output of CCM Agent - cross-asset context analysis"""
+    """Output of CCM Agent - cross-asset context analysis."""
 
     tier: Tier
     symbol: str
     timestamp: datetime
 
-    ccm: List[CCMPair] = Field(description="Per-pair CCM results")
+    # === Modern CCM outputs ===
+    pairs: List[CCMPairResult] = Field(default_factory=list, description="All evaluated CCM pairs")
+    pair_trade_candidates: List[CCMPairResult] = Field(
+        default_factory=list,
+        description="Top CCM pairs suitable for pair-trade consideration",
+    )
+    warnings: List[str] = Field(default_factory=list, description="Non-fatal issues during CCM evaluation")
+
+    # === Legacy fields (retained for compatibility) ===
+    ccm: List[CCMPair] = Field(default_factory=list, description="Deprecated: use pairs instead")
 
     sector_coupling: float = Field(
         ge=0.0, le=1.0, description="Mean CCM with crypto sector peers"
@@ -203,9 +225,17 @@ class CCMSummary(BaseModel):
                 "tier": "ST",
                 "symbol": "BTC-USD",
                 "timestamp": "2024-01-15T12:00:00Z",
-                "ccm": [
-                    {"pair": "BTC-ETH", "skill_xy": 0.78, "skill_yx": 0.74, "lead": "symmetric"}
+                "pairs": [
+                    {
+                        "asset_a": "BTC-USD",
+                        "asset_b": "ETH-USD",
+                        "rho_ab": 0.74,
+                        "rho_ba": 0.69,
+                        "delta_rho": 0.05,
+                        "interpretation": "A_leads_B",
+                    }
                 ],
+                "pair_trade_candidates": [],
                 "sector_coupling": 0.72,
                 "macro_coupling": 0.18,
                 "decoupled": True,

@@ -87,10 +87,44 @@ tests:
   adf_maxlag: null  # auto-select
 
 # CCM (Cross-Asset Context) Agent configuration
-# DISABLED: Data access issues with ETH-USD, SOL-USD, DXY, VIX
 ccm:
-  enabled: false  # Disabled - insufficient data access
+  enabled: true
+  # Directed tiers where CCM will be evaluated
   tiers: ["LT", "MT", "ST"]
+  tiers_for_ccm: ["ST", "MT"]
+
+  # Directed asset pairs to evaluate (A leads B, and B leads A)
+  pairs:
+    - ["NVDA", "SPY"]
+    - ["AAPL", "SPY"]
+    - ["BTC-USD", "ETH-USD"]
+    - ["EUR-USD", "USD-JPY"]
+
+  # CCM parameters
+  E: 3
+  tau: 1
+  lib_sizes: [50, 80, 120]
+  min_points: 200
+
+  # Interpretation thresholds
+  rho_threshold: 0.25
+  delta_threshold: 0.10
+  top_n: 5
+
+  # Legacy context configuration retained for compatibility
+  context_symbols:
+    - ETH-USD
+    - SOL-USD
+    - SPY
+    - DXY
+    - VIX
+  params:
+    E: 3
+    tau: 1
+    library_frac: 0.8
+  thresholds:
+    sector_strong: 0.60
+    macro_low: 0.20
 
 # Market Intelligence Agent configuration (Microstructure Analysis)
 market_intelligence:

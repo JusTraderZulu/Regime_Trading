@@ -874,6 +874,39 @@ def classify_regime(
             votes[RegimeLabel.TRENDING] += vol_weight * 0.5
         else:
             votes[RegimeLabel.RANDOM] += vol_weight * 0.5
+
+    # Auxiliary CCM vote adjustment based on directional leadership
+    ccm_cfg = config.get("ccm", {}) if isinstance(config, dict) else {}
+    ccm_vote_weight = float(ccm_cfg.get("vote_weight", 0.05))
+    ccm_rho_threshold = float(ccm_cfg.get("rho_threshold", 0.2))
+
+    if ccm and getattr(ccm, "pairs", None):
+        ccm_bias = 0.0
+        for pair in ccm.pairs:
+            if features.symbol not in {pair.asset_a, pair.asset_b}:
+                continue
+
+            rho_candidates = [
+                value for value in (pair.rho_ab, pair.rho_ba) if value is not None
+            ]
+            if not rho_candidates or max(rho_candidates) < ccm_rho_threshold:
+                continue
+
+            if pair.asset_a == features.symbol:
+                if pair.interpretation == "A_leads_B":
+                    ccm_bias += ccm_vote_weight
+                elif pair.interpretation == "B_leads_A":
+                    ccm_bias -= ccm_vote_weight
+            elif pair.asset_b == features.symbol:
+                if pair.interpretation == "B_leads_A":
+                    ccm_bias += ccm_vote_weight
+                elif pair.interpretation == "A_leads_B":
+                    ccm_bias -= ccm_vote_weight
+
+        if ccm_bias > 0:
+            votes[RegimeLabel.TRENDING] += ccm_bias
+        elif ccm_bias < 0:
+            votes[RegimeLabel.MEAN_REVERTING] += abs(ccm_bias)
     
     # Select regime with highest vote
     label = max(votes, key=votes.get)
@@ -942,6 +975,22 @@ def classify_regime(
         f"MR={votes[RegimeLabel.MEAN_REVERTING]:.2f}, "
         f"R={votes[RegimeLabel.RANDOM]:.2f}"
     )
+
+    if ccm and getattr(ccm, "pairs", None):
+        lead_pair = next(
+            (pair for pair in ccm.pairs if features.symbol in {pair.asset_a, pair.asset_b}),
+            None,
+        )
+        if lead_pair:
+            rho_values = [
+                value for value in (lead_pair.rho_ab, lead_pair.rho_ba) if value is not None
+            ]
+            if rho_values:
+                max_rho = max(rho_values)
+                rationale_parts.append(
+                    f"CCM_lead={lead_pair.asset_a}->{lead_pair.asset_b} "
+                    f"(ρ≈{max_rho:.2f}, {lead_pair.interpretation})"
+                )
     
     rationale = ", ".join(rationale_parts)
 

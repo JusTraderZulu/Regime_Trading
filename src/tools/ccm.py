@@ -1,251 +1,299 @@
 """
-CCM (Convergent Cross Mapping) for nonlinear causality detection.
+CCM (Convergent Cross Mapping) utilities for nonlinear causality detection.
 
-MVP: Uses correlation^2 as skill proxy.
-TODO Phase 2: Replace with pyEDM for true CCM implementation.
+Implements a pyEDM-backed CCM workflow with graceful fallback to a correlation-based
+proxy when pyEDM is unavailable. Results are expressed through modern CCM schemas that
+capture directional skill, interpretation metadata, and legacy compatibility fields.
 """
 
+from __future__ import annotations
+
 import logging
-from typing import Dict, List
+from datetime import datetime
+from math import isnan
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
 from scipy.stats import pearsonr
 
-from src.core.schemas import CCMPair, CCMSummary, Tier
+try:
+    from pyEDM import CCM as EDM_CCM  # type: ignore
+
+    _HAS_PYEDM = True
+except Exception:  # pragma: no cover - pyEDM may be optional in some envs
+    EDM_CCM = None
+    _HAS_PYEDM = False
+
+from src.core.schemas import CCMPair, CCMPairResult, CCMSummary, Tier
 
 logger = logging.getLogger(__name__)
 
 
 # ============================================================================
-# CCM Computation (MVP with correlation proxy)
+# Low-level helpers
 # ============================================================================
 
 
-def compute_ccm_skill(
-    target: pd.Series,
-    context: pd.Series,
-    E: int = 3,
-    tau: int = 1,
-    library_frac: float = 0.8,
-) -> float:
-    """
-    Compute CCM skill (target ← context).
-
-    MVP Implementation: Use correlation^2 as proxy for CCM skill.
-    This is a reasonable approximation for linear coupling.
-
-    Args:
-        target: Target time series
-        context: Context time series
-        E: Embedding dimension (unused in MVP)
-        tau: Time delay (unused in MVP)
-        library_frac: Library fraction (unused in MVP)
-
-    Returns:
-        Skill value in [0, 1]
-    """
-    # Align series
-    aligned = pd.DataFrame({"target": target, "context": context}).dropna()
-
+def _pearson_r2_skill(series_a: pd.Series, series_b: pd.Series) -> float:
+    """Fallback CCM skill proxy using Pearson correlation squared."""
+    aligned = pd.DataFrame({"A": series_a, "B": series_b}).dropna()
     if len(aligned) < 10:
-        logger.warning("Insufficient aligned data for CCM")
-        return 0.0
-
-    target_arr = aligned["target"].values
-    context_arr = aligned["context"].values
+        return float("nan")
 
     try:
-        # MVP: Use squared correlation as skill proxy
-        corr, p_value = pearsonr(target_arr, context_arr)
-        skill = corr**2  # R^2 as skill measure
-
-        # Bound to [0, 1]
-        skill = max(0.0, min(1.0, skill))
-
-        return float(skill)
-
-    except Exception as e:
-        logger.warning(f"CCM skill computation failed: {e}")
-        return 0.0
+        corr, _ = pearsonr(aligned["A"].values, aligned["B"].values)
+        return float(max(0.0, min(1.0, corr**2)))
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Pearson correlation failed during CCM fallback: %s", exc)
+        return float("nan")
 
 
-def compute_ccm_matrix(
-    target: pd.Series,
-    contexts: Dict[str, pd.Series],
-    E: int = 3,
-    tau: int = 1,
-    library_frac: float = 0.8,
-) -> pd.DataFrame:
+def _compute_ccm_rho(
+    series_a: pd.Series,
+    series_b: pd.Series,
+    E: int,
+    tau: int,
+    lib_sizes: Sequence[int],
+    min_points: int,
+) -> float:
     """
-    Compute CCM skill matrix between target and multiple context series.
+    Compute CCM rho using pyEDM when available, otherwise fall back to correlation^2.
 
-    Args:
-        target: Target time series
-        contexts: Dict of {symbol: series}
-        E: Embedding dimension
-        tau: Time delay
-        library_frac: Library fraction
-
-    Returns:
-        DataFrame with columns: pair, skill_xy, skill_yx
+    Returns NaN when data are insufficient or computation fails.
     """
-    results = []
+    aligned = pd.DataFrame({"A": series_a, "B": series_b}).dropna()
+    if aligned.empty:
+        return float("nan")
 
-    target_name = target.name or "target"
+    max_lib = max(lib_sizes) if lib_sizes else 0
+    if len(aligned) < max(min_points, max_lib + (E * tau) + 5):
+        return float("nan")
 
-    for ctx_name, ctx_series in contexts.items():
-        # Skip self
-        if ctx_name == target_name:
+    if not _HAS_PYEDM:
+        return _pearson_r2_skill(aligned["A"], aligned["B"])
+
+    try:
+        lib_sizes_str = ",".join(str(int(size)) for size in lib_sizes)
+        result = EDM_CCM(
+            dataFrame=aligned,
+            E=E,
+            tau=tau,
+            columns="A",
+            target="B",
+            libSizes=lib_sizes_str,
+        )
+        rho_series = pd.to_numeric(result.get("rho", pd.Series(dtype=float)), errors="coerce")
+        rho = float(rho_series.mean()) if not rho_series.empty else float("nan")
+        if isnan(rho):
+            return _pearson_r2_skill(aligned["A"], aligned["B"])
+        return rho
+    except Exception as exc:  # pragma: no cover - pyEDM runtime safety
+        logger.warning("pyEDM CCM failed (falling back to correlation proxy): %s", exc)
+        return _pearson_r2_skill(aligned["A"], aligned["B"])
+
+
+def compute_ccm_pair(
+    series_a: pd.Series,
+    series_b: pd.Series,
+    E: int,
+    tau: int,
+    lib_sizes: Sequence[int],
+    min_points: int,
+) -> Tuple[float, float, float]:
+    """Compute bidirectional CCM skill (A→B and B→A) and the directional delta."""
+    rho_ab = _compute_ccm_rho(series_a, series_b, E, tau, lib_sizes, min_points)
+    rho_ba = _compute_ccm_rho(series_b, series_a, E, tau, lib_sizes, min_points)
+    if any(isnan(value) for value in [rho_ab, rho_ba]):
+        return rho_ab, rho_ba, float("nan")
+    return rho_ab, rho_ba, rho_ab - rho_ba
+
+
+def _interpret_pair(
+    rho_ab: Optional[float],
+    rho_ba: Optional[float],
+    delta: Optional[float],
+    rho_threshold: float,
+    delta_threshold: float,
+) -> str:
+    """Translate rho statistics into an interpretation label."""
+    values = [rho_ab, rho_ba]
+    if any(val is None or isnan(val) for val in values):
+        return "weak"
+
+    if max(values) < rho_threshold:
+        return "weak"
+
+    if delta is None or isnan(delta) or abs(delta) < delta_threshold:
+        return "symmetric"
+
+    return "A_leads_B" if delta > 0 else "B_leads_A"
+
+
+def _legacy_lead_label(modern_label: str) -> str:
+    """Map modern CCM interpretation back to legacy lead nomenclature."""
+    mapping = {
+        "A_leads_B": "x_leads",
+        "B_leads_A": "y_leads",
+        "symmetric": "symmetric",
+        "weak": "weak",
+    }
+    return mapping.get(modern_label, "weak")
+
+
+def _summarize_coupling(
+    pairs: Iterable[CCMPairResult],
+    context_symbols: List[str],
+    target_symbol: str,
+) -> Tuple[float, float]:
+    """Derive sector and macro coupling aggregates."""
+    if not pairs:
+        return 0.0, 0.0
+
+    sector_symbols = [s for s in context_symbols if "USD" in s and s != target_symbol]
+    macro_symbols = [s for s in context_symbols if s in {"SPY", "DXY", "VIX", "GLD"}]
+
+    sector_skills: List[float] = []
+    macro_skills: List[float] = []
+
+    for pair in pairs:
+        max_rho = max(
+            [val for val in [pair.rho_ab, pair.rho_ba] if val is not None and not isnan(val)],
+            default=float("nan"),
+        )
+        if isnan(max_rho):
             continue
 
-        # Compute bidirectional CCM
-        skill_xy = compute_ccm_skill(ctx_series, target, E, tau, library_frac)  # target → context
-        skill_yx = compute_ccm_skill(target, ctx_series, E, tau, library_frac)  # context → target
-
-        # Determine lead relationship
-        if abs(skill_xy - skill_yx) < 0.05:
-            lead = "symmetric"
-        elif skill_xy > skill_yx:
-            lead = "x_leads"  # target leads context
-        else:
-            lead = "y_leads"  # context leads target
-
-        # Weak coupling threshold
-        if max(skill_xy, skill_yx) < 0.1:
-            lead = "weak"
-
-        results.append(
-            {
-                "pair": f"{target_name}-{ctx_name}",
-                "skill_xy": skill_xy,
-                "skill_yx": skill_yx,
-                "lead": lead,
-            }
-        )
-
-    return pd.DataFrame(results)
-
-
-# ============================================================================
-# CCM Summary
-# ============================================================================
-
-
-def summarize_ccm(
-    ccm_df: pd.DataFrame,
-    sector_symbols: List[str],
-    macro_symbols: List[str],
-    target_symbol: str,
-) -> Dict[str, float]:
-    """
-    Summarize CCM matrix into sector and macro coupling scores.
-
-    Args:
-        ccm_df: CCM results DataFrame
-        sector_symbols: List of crypto sector symbols (e.g., ETH-USD, SOL-USD)
-        macro_symbols: List of macro symbols (e.g., SPY, DXY, VIX)
-        target_symbol: Target symbol name
-
-    Returns:
-        Dict with sector_coupling, macro_coupling
-    """
-    if ccm_df.empty:
-        return {"sector_coupling": 0.0, "macro_coupling": 0.0}
-
-    # Extract symbol from pair string
-    def extract_context_symbol(pair: str, target: str) -> str:
-        # pair format: "BTC-USD-ETH-USD"
-        parts = pair.split("-")
-        # This is a simplified parsing; adjust based on actual format
-        for sym in sector_symbols + macro_symbols:
-            if sym in pair and sym != target:
-                return sym
-        return ""
-
-    sector_skills = []
-    macro_skills = []
-
-    for _, row in ccm_df.iterrows():
-        pair = row["pair"]
-        # Use max skill (bidirectional)
-        skill = max(row["skill_xy"], row["skill_yx"])
-
-        # Determine if sector or macro
-        is_sector = any(sym in pair for sym in sector_symbols)
-        is_macro = any(sym in pair for sym in macro_symbols)
-
-        if is_sector:
-            sector_skills.append(skill)
-        if is_macro:
-            macro_skills.append(skill)
+        assets = {pair.asset_a, pair.asset_b}
+        if assets.intersection(sector_symbols):
+            sector_skills.append(max_rho)
+        if assets.intersection(macro_symbols):
+            macro_skills.append(max_rho)
 
     sector_coupling = float(np.mean(sector_skills)) if sector_skills else 0.0
     macro_coupling = float(np.mean(macro_skills)) if macro_skills else 0.0
+    return sector_coupling, macro_coupling
 
-    return {
-        "sector_coupling": sector_coupling,
-        "macro_coupling": macro_coupling,
-    }
+
+def _build_legacy_pairs(pairs: Iterable[CCMPairResult]) -> List[CCMPair]:
+    """Expose legacy CCM pair structures for backwards compatibility."""
+    legacy_pairs: List[CCMPair] = []
+    for pair in pairs:
+        lead_label = _legacy_lead_label(pair.interpretation)
+        legacy_pairs.append(
+            CCMPair(
+                pair=f"{pair.asset_a}-{pair.asset_b}",
+                skill_xy=pair.rho_ab or 0.0,
+                skill_yx=pair.rho_ba or 0.0,
+                lead=lead_label,
+            )
+        )
+    return legacy_pairs
 
 
 # ============================================================================
-# High-level CCM Agent Function
+# High-level CCM interface
 # ============================================================================
 
 
 def compute_ccm_summary(
     target_series: pd.Series,
-    context_data: Dict[str, pd.Series],
+    series_lookup: Dict[str, pd.Series],
     tier: Tier,
     symbol: str,
     config: Dict,
-    timestamp = None,
+    timestamp: Optional[datetime] = None,
 ) -> CCMSummary:
     """
-    Compute full CCM summary for a target asset.
+    Compute CCM summary for the given tier using configured asset pairs.
 
     Args:
-        target_series: Target asset price series
-        context_data: Dict of {symbol: price_series} for context assets
-        tier: Market tier
-        symbol: Target symbol
-        config: Config dict with CCM settings
-        timestamp: Analysis timestamp
-
-    Returns:
-        CCMSummary schema
+        target_series: Series for the pipeline's primary symbol (used when pairs absent).
+        series_lookup: Mapping of symbol -> price series available for CCM evaluation.
+        tier: Market tier under evaluation.
+        symbol: Primary pipeline symbol (for metadata and fallbacks).
+        config: Full pipeline configuration containing `ccm`.
+        timestamp: Optional evaluation timestamp.
     """
-    from datetime import datetime
-
     if timestamp is None:
         timestamp = datetime.utcnow()
 
     ccm_config = config.get("ccm", {})
-    E = ccm_config.get("params", {}).get("E", 3)
-    tau = ccm_config.get("params", {}).get("tau", 1)
-    library_frac = ccm_config.get("params", {}).get("library_frac", 0.8)
+    pairs_config: List[Sequence[str]] = ccm_config.get("pairs", []) or []
+    rho_threshold = ccm_config.get("rho_threshold", 0.2)
+    delta_threshold = ccm_config.get("delta_threshold", 0.05)
+    top_n = ccm_config.get("top_n", 5)
+    E = ccm_config.get("E", ccm_config.get("params", {}).get("E", 3))
+    tau = ccm_config.get("tau", ccm_config.get("params", {}).get("tau", 1))
+    lib_sizes = ccm_config.get("lib_sizes", [50, 80, 120])
+    min_points = ccm_config.get("min_points", 200)
 
-    # Compute CCM matrix
-    target_series.name = symbol
-    ccm_df = compute_ccm_matrix(target_series, context_data, E, tau, library_frac)
+    # Fallback to legacy behaviour: evaluate target vs each context symbol
+    if not pairs_config:
+        pairs_config = [[symbol, ctx] for ctx in series_lookup if ctx != symbol]
 
-    # Define sector vs macro symbols
+    evaluated_pairs: List[CCMPairResult] = []
+    warnings: List[str] = []
+
+    for pair in pairs_config:
+        if len(pair) != 2:
+            warnings.append(f"Invalid CCM pair definition (expected 2 symbols): {pair}")
+            continue
+
+        asset_a, asset_b = pair
+        series_a = series_lookup.get(asset_a)
+        series_b = series_lookup.get(asset_b)
+
+        if series_a is None or series_b is None:
+            warnings.append(f"Missing data for pair {asset_a}/{asset_b} on tier {tier.value}")
+            continue
+
+        rho_ab, rho_ba, delta = compute_ccm_pair(series_a, series_b, E, tau, lib_sizes, min_points)
+
+        interpretation = _interpret_pair(
+            rho_ab if not isnan(rho_ab) else None,
+            rho_ba if not isnan(rho_ba) else None,
+            delta if not isnan(delta) else None,
+            rho_threshold,
+            delta_threshold,
+        )
+
+        evaluated_pairs.append(
+            CCMPairResult(
+                asset_a=asset_a,
+                asset_b=asset_b,
+                rho_ab=None if isnan(rho_ab) else rho_ab,
+                rho_ba=None if isnan(rho_ba) else rho_ba,
+                delta_rho=None if isnan(delta) else delta,
+                interpretation=interpretation,
+            )
+        )
+
+    # Sort pairs by maximum rho (descending)
+    def _pair_sort_key(result: CCMPairResult) -> float:
+        candidates = [
+            val for val in [result.rho_ab, result.rho_ba] if val is not None and not isnan(val)
+        ]
+        return max(candidates) if candidates else -1.0
+
+    evaluated_pairs.sort(key=_pair_sort_key, reverse=True)
+
+    # Limit to configured top N for concise downstream reporting
+    all_pairs = evaluated_pairs
+    if top_n and top_n > 0:
+        evaluated_pairs = evaluated_pairs[:top_n]
+
+    # Pair-trade candidates (high skill, non-weak)
+    pair_trade_candidates: List[CCMPairResult] = [
+        pair for pair in all_pairs if _pair_sort_key(pair) >= rho_threshold and pair.interpretation != "weak"
+    ][:top_n]
+
     context_symbols = ccm_config.get("context_symbols", [])
-    # Heuristic: crypto symbols are sector, others are macro
-    sector_symbols = [s for s in context_symbols if "USD" in s and s != symbol]
-    macro_symbols = [s for s in context_symbols if s in ["SPY", "DXY", "VIX", "GLD"]]
+    sector_coupling, macro_coupling = _summarize_coupling(all_pairs, context_symbols, symbol)
 
-    # Summarize
-    coupling = summarize_ccm(ccm_df, sector_symbols, macro_symbols, symbol)
-    sector_coupling = coupling["sector_coupling"]
-    macro_coupling = coupling["macro_coupling"]
-
-    # Check decoupling threshold
     macro_low_threshold = ccm_config.get("thresholds", {}).get("macro_low", 0.2)
     decoupled = macro_coupling < macro_low_threshold
 
-    # Generate notes
     if sector_coupling > 0.6 and macro_coupling < 0.3:
         notes = "Strong crypto-sector sync; weak macro influence (decoupled)."
     elif sector_coupling < 0.3 and macro_coupling > 0.6:
@@ -255,25 +303,16 @@ def compute_ccm_summary(
     else:
         notes = "Mixed coupling; transitional or idiosyncratic phase."
 
-    # Convert DataFrame to list of CCMPair
-    ccm_pairs = [
-        CCMPair(
-            pair=row["pair"],
-            skill_xy=row["skill_xy"],
-            skill_yx=row["skill_yx"],
-            lead=row["lead"],
-        )
-        for _, row in ccm_df.iterrows()
-    ]
-
     return CCMSummary(
         tier=tier,
         symbol=symbol,
         timestamp=timestamp,
-        ccm=ccm_pairs,
+        pairs=evaluated_pairs,
+        pair_trade_candidates=pair_trade_candidates,
+        warnings=warnings,
+        ccm=_build_legacy_pairs(evaluated_pairs),
         sector_coupling=sector_coupling,
         macro_coupling=macro_coupling,
         decoupled=decoupled,
         notes=notes,
     )
-

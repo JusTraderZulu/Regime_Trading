@@ -19,6 +19,7 @@ huggingface-hub==0.20.2
 tqdm==4.66.1
 pytz==2024.1
 alpaca-py==0.43.0
+pyEDM>=1.0.0
 
 # PDF generation (optional - install with: pip install -e .[pdf])
 # Recommended: Install pandoc via system package manager for best results

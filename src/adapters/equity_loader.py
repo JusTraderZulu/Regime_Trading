@@ -25,11 +25,12 @@ class EquityDataLoader:
         creds = get_alpaca_credentials()
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.feed = creds.get("data_feed", "iex")
         self.client = AlpacaStocksClient(
             key_id=creds.get("key_id"),
             secret_key=creds.get("secret_key"),
             base_url=creds.get("base_url"),
-            feed=creds.get("data_feed", "iex"),
+            feed=self.feed,
         )
         self.last_meta: Optional[Dict[str, Dict[str, Any]]] = None
 

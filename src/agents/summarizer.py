@@ -5,6 +5,7 @@ Enhanced with optional LLM support for natural language reports.
 
 import json
 import logging
+import math
 import subprocess
 from datetime import datetime
 from functools import lru_cache
@@ -16,7 +17,7 @@ import yaml
 
 from src.bridges.symbol_map import parse_symbol_info
 from src.core.market_intelligence import get_market_intelligence_client
-from src.core.schemas import ExecReport, RegimeDecision, RegimeLabel, StochasticForecastResult
+from src.core.schemas import CCMSummary, ExecReport, RegimeDecision, RegimeLabel, StochasticForecastResult
 from src.core.state import PipelineState
 
 logger = logging.getLogger(__name__)
@@ -136,6 +137,74 @@ def _format_percent(value: Optional[float], decimals: int = 1, signed: bool = Fa
         return "n/a"
     fmt = f"{{:{'+' if signed else ''}.{decimals}f}}%"
     return fmt.format(value * 100.0)
+
+
+def _format_rho(value: Optional[float]) -> str:
+    if value is None:
+        return "n/a"
+    try:
+        if math.isnan(value):
+            return "n/a"
+    except TypeError:
+        return "n/a"
+    return f"{value:.2f}"
+
+
+def _ccm_interpretation_label(tag: str) -> str:
+    mapping = {
+        "A_leads_B": "A leads B",
+        "B_leads_A": "B leads A",
+        "symmetric": "symmetric",
+        "weak": "weak",
+    }
+    return mapping.get(tag, tag.replace("_", " "))
+
+
+def _render_ccm_section(
+    ccm: Optional[CCMSummary],
+    tier_label: str,
+    regime: Optional[RegimeDecision],
+    top_n: int,
+) -> List[str]:
+    if not ccm or not ccm.pairs:
+        return []
+
+    lines = [
+        "",
+        f"### 🔗 Cross-Convergent Mapping (CCM) Insights — {tier_label}",
+        "| Pair | ρ(A→B) | ρ(B→A) | Δρ | Interpretation |",
+        "|------|--------|--------|----|----------------|",
+    ]
+
+    pairs = ccm.pairs[:top_n] if top_n > 0 else ccm.pairs
+    for pair in pairs:
+        delta_str = _format_rho(pair.delta_rho)
+        interpretation = _ccm_interpretation_label(pair.interpretation)
+        lines.append(
+            f"| {pair.asset_a}→{pair.asset_b} | {_format_rho(pair.rho_ab)} | "
+            f"{_format_rho(pair.rho_ba)} | {delta_str} | {interpretation} |"
+        )
+
+    if ccm.warnings:
+        lines.extend(["", f"_Warnings_: {', '.join(ccm.warnings)}"])
+
+    if regime and regime.label == RegimeLabel.RANDOM and ccm.pair_trade_candidates:
+        candidate_names = []
+        for candidate in ccm.pair_trade_candidates[:top_n if top_n > 0 else None]:
+            rho_candidates = [
+                value for value in (candidate.rho_ab, candidate.rho_ba) if value is not None
+            ]
+            rho_note = f" (ρ≈{max(rho_candidates):.2f})" if rho_candidates else ""
+            candidate_names.append(f"{candidate.asset_a}/{candidate.asset_b}{rho_note}")
+        if candidate_names:
+            lines.extend(
+                [
+                    "",
+                    f"**Pair-Trade Candidates (random regime)**: {', '.join(candidate_names)}",
+                ]
+            )
+
+    return lines
 
 
 def _quantile_key(value: float) -> str:
@@ -317,6 +386,9 @@ def summarizer_node(state: PipelineState) -> dict:
     features_lt = state.get("features_lt")
     features_mt = state.get("features_mt")
     features_st = state.get("features_st")
+    ccm_lt = state.get("ccm_lt")
+    ccm_mt = state.get("ccm_mt")
+    ccm_st = state.get("ccm_st")
     judge_report = state.get("judge_report")
     judge_warnings = []
     if judge_report and judge_report.warnings:
@@ -759,9 +831,30 @@ def summarizer_node(state: PipelineState) -> dict:
         "## Technical Context",
         f"- **Levels (Pivot{pivot_lookback_cfg}, Donchian{donchian_lookback_cfg}):** Support {support_str}, Resistance {resistance_str}, Breakout {breakout_level}",
         f"- **Tape/Volume:** {tape_note}",
-        "",
-        "## Risk Factors",
     ])
+
+    ccm_config = config.get("ccm", {}) if isinstance(config, dict) else {}
+    ccm_top_n = int(ccm_config.get("top_n", 5) or 5)
+    ccm_tiers = ccm_config.get("tiers_for_ccm", ccm_config.get("tiers", [])) or []
+    ccm_lookup = {
+        "LT": (ccm_lt, regime_lt, lt_bar_label),
+        "MT": (ccm_mt, regime_mt, mt_bar_label),
+        "ST": (ccm_st, regime_st, st_bar_label),
+    }
+
+    for tier in ccm_tiers:
+        ccm_entry = ccm_lookup.get(tier)
+        if not ccm_entry:
+            continue
+        ccm_obj, ccm_regime, bar_label = ccm_entry
+        section_lines = _render_ccm_section(
+            ccm_obj,
+            f"{tier} ({bar_label})",
+            ccm_regime,
+            ccm_top_n,
+        )
+        if section_lines:
+            summary_lines.extend(section_lines)
 
     summary_lines.extend([
         "",
@@ -769,6 +862,11 @@ def summarizer_node(state: PipelineState) -> dict:
         f"- Pipeline commit: {commit_id or 'unknown'}",
         f"- Data cutoff (UTC): {data_cutoff_str}",
         f"- Bar alignment: {bar_alignment_str}",
+    ])
+
+    summary_lines.extend([
+        "",
+        "## Risk Factors",
     ])
 
     risk_items = [
