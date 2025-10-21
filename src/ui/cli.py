@@ -8,6 +8,7 @@ Usage:
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -17,6 +18,24 @@ from src.reporters.executive_report import write_report_to_disk
 from src.reporters.pdf_report import generate_pdf_from_state
 
 logger = logging.getLogger(__name__)
+
+
+def _configure_local_caches() -> None:
+    """
+    Ensure matplotlib and fontconfig caches point to writable directories.
+    """
+    cache_root = Path(os.environ.get("XDG_CACHE_HOME") or (Path.cwd() / ".cache"))
+    cache_root.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("XDG_CACHE_HOME", str(cache_root))
+
+    mpl_dir = Path(os.environ.get("MPLCONFIGDIR") or (cache_root / "matplotlib"))
+    mpl_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["MPLCONFIGDIR"] = str(mpl_dir)
+
+    (cache_root / "fontconfig").mkdir(parents=True, exist_ok=True)
+
+
+_configure_local_caches()
 
 
 def run_analysis(symbol: str, mode: str, st_bar: str | None, config: str, pdf: bool = False, qc_backtest: bool = False) -> int:
@@ -250,4 +269,3 @@ Examples:
 
 if __name__ == "__main__":
     main()
-

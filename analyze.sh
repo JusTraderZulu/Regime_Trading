@@ -10,6 +10,12 @@
 
 set -e  # Exit on error
 
+# Ensure local cache directories for matplotlib/fontconfig
+CACHE_ROOT="${XDG_CACHE_HOME:-$PWD/.cache}"
+export XDG_CACHE_HOME="$CACHE_ROOT"
+export MPLCONFIGDIR="${MPLCONFIGDIR:-$CACHE_ROOT/matplotlib}"
+mkdir -p "$XDG_CACHE_HOME" "$MPLCONFIGDIR" "$CACHE_ROOT/fontconfig"
+
 # Colors for output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -25,7 +31,7 @@ echo ""
 if [ $# -lt 2 ]; then
     echo -e "${YELLOW}Usage: ./analyze.sh SYMBOL MODE [OPTIONS]${NC}"
     echo ""
-    echo "SYMBOL: X:BTCUSD, X:ETHUSD, X:SOLUSD, X:XRPUSD, etc."
+    echo "SYMBOL: e.g. SPY, X:BTCUSD, ETH-USD"
     echo "MODE:   fast (quick regime check) or thorough (full analysis)"
     echo ""
     echo "OPTIONS:"
@@ -45,9 +51,53 @@ if [ $# -lt 2 ]; then
     exit 1
 fi
 
-SYMBOL=$1
-MODE=$2
-shift 2  # Remove first two args, keep rest for options
+# Parse arguments (supports positional or --symbol/--mode flags)
+SYMBOL=""
+MODE=""
+EXTRA_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --symbol|-s)
+            SYMBOL="$2"
+            shift 2
+            ;;
+        --mode|-m)
+            MODE="$2"
+            shift 2
+            ;;
+        --help|-h)
+            shift
+            echo -e "${YELLOW}Usage: ./analyze.sh [--symbol SYMBOL] [--mode MODE] [OPTIONS]${NC}"
+            exit 0
+            ;;
+        -*)
+            EXTRA_ARGS+=("$1")
+            if [[ $# -gt 1 && ! "$2" =~ ^- ]]; then
+                EXTRA_ARGS+=("$2")
+                shift 2
+            else
+                shift
+            fi
+            ;;
+        *)
+            if [[ -z "$SYMBOL" ]]; then
+                SYMBOL="$1"
+            elif [[ -z "$MODE" ]]; then
+                MODE="$1"
+            else
+                EXTRA_ARGS+=("$1")
+            fi
+            shift
+            ;;
+    esac
+done
+
+if [[ -z "$SYMBOL" || -z "$MODE" ]]; then
+    echo -e "${YELLOW}Error: SYMBOL and MODE are required.${NC}"
+    echo -e "${YELLOW}Usage: ./analyze.sh [--symbol SYMBOL] [--mode MODE] [OPTIONS]${NC}"
+    exit 1
+fi
 
 # Load API keys from files
 echo -e "${GREEN}Loading API keys...${NC}"
@@ -57,6 +107,20 @@ if [ -f "polygon_key.txt" ]; then
     echo "✓ Polygon API key loaded"
 else
     echo -e "${YELLOW}⚠ polygon_key.txt not found - using environment variable${NC}"
+fi
+
+if [ -f "alpaca_keys.txt" ]; then
+    ALPACA_KEY_ID_FILE=$(sed -n '1p' alpaca_keys.txt | tr -d '\n')
+    ALPACA_SECRET_KEY_FILE=$(sed -n '2p' alpaca_keys.txt | tr -d '\n')
+    if [ -n "$ALPACA_KEY_ID_FILE" ] && [ -n "$ALPACA_SECRET_KEY_FILE" ]; then
+        export ALPACA_KEY_ID="$ALPACA_KEY_ID_FILE"
+        export ALPACA_SECRET_KEY="$ALPACA_SECRET_KEY_FILE"
+        echo "✓ Alpaca API keys loaded"
+    else
+        echo -e "${YELLOW}⚠ alpaca_keys.txt present but missing key/secret lines${NC}"
+    fi
+else
+    echo -e "${YELLOW}⚠ alpaca_keys.txt not found - using environment variables${NC}"
 fi
 
 if [ -f "perp_key.txt" ]; then
@@ -81,7 +145,7 @@ source .venv/bin/activate
 echo -e "${GREEN}Running analysis: ${SYMBOL} (${MODE} mode)${NC}"
 echo ""
 
-python -m src.ui.cli run --symbol "$SYMBOL" --mode "$MODE" "$@"
+python -m src.ui.cli run --symbol "$SYMBOL" --mode "$MODE" "${EXTRA_ARGS[@]}"
 
 # Check if successful
 if [ $? -eq 0 ]; then
@@ -110,4 +174,3 @@ else
     echo -e "${YELLOW}⚠ Analysis failed - check logs above${NC}"
     exit 1
 fi
-

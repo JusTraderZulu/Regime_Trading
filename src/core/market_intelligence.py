@@ -5,16 +5,47 @@ Uses Perplexity AI or web search + OpenAI for real-time context.
 """
 
 import logging
-from typing import Optional, Dict
+from typing import Dict, Optional
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+ASSET_CLASS_CONTEXT = {
+    "CRYPTO": (
+        "Highlight protocol upgrades, on-chain flows, ETF activity, regulatory headlines, "
+        "exchange/liquidity conditions, and correlations with macro drivers."
+    ),
+    "FX": (
+        "Focus on central bank policy, macro data surprises, cross-asset flows, rate differentials, "
+        "positioning, and geopolitical catalysts that move currency pairs."
+    ),
+    "EQUITY": (
+        "Cover earnings reports, guidance changes, buybacks, sector/ETF flows, macro data (rates, CPI), "
+        "liquidity conditions, and notable institutional positioning or options activity."
+    ),
+}
+
+
+def _default_instrument_label(symbol: str, asset_class: str) -> str:
+    """Derive a human-readable instrument label."""
+    if asset_class == "CRYPTO":
+        label = symbol.replace("X:", "").replace("_", "").upper()
+        if label.endswith("USD") and len(label) > 3:
+            base = label[:-3]
+            return f"{base}/USD"
+        return label
+    if asset_class == "FX":
+        clean = symbol.replace("C:", "").replace("-", "").replace("_", "").upper()
+        if len(clean) == 6:
+            return f"{clean[:3]}/{clean[3:]}"
+        return clean
+    return symbol.replace("NYSE:", "").replace("NASDAQ:", "").replace("ARCA:", "")
 
 
 class MarketIntelligenceLLM:
     """
     LLM with internet access for market context and news.
-    Used in fast mode to answer: "What's happening with this token?"
+    Used in fast mode to answer: "What's happening with this instrument?"
     """
     
     def __init__(self, api_key: Optional[str] = None, provider: str = "perplexity"):
@@ -89,34 +120,46 @@ class MarketIntelligenceLLM:
         regime_data: Dict,
         features: Dict,
         current_price: Optional[float] = None,
+        asset_class: str = "UNKNOWN",
+        instrument_label: Optional[str] = None,
     ) -> str:
         """
         Generate market intelligence report with internet context.
         
         Args:
-            symbol: Crypto symbol (e.g., "X:ETHUSD", "X:BTCUSD")
+            symbol: Instrument symbol (internal or QC format)
             regime_data: Dict with regime information
             features: Dict with statistical features
             current_price: Current price (optional)
+            asset_class: Asset class string (CRYPTO, FX, EQUITY)
+            instrument_label: Optional cleaned label for prompts
         
         Returns:
             Market intelligence report
         """
         if not self.enabled:
-            return self._fallback_intelligence(symbol, regime_data)
+            return self._fallback_intelligence(symbol, regime_data, asset_class, instrument_label)
         
-        # Extract clean symbol for search
-        clean_symbol = symbol.replace("X:", "").replace("USD", "")  # ETH, BTC, etc.
+        asset_class = (asset_class or "UNKNOWN").upper()
+        instrument_label = instrument_label or _default_instrument_label(symbol, asset_class)
+        context_instructions = ASSET_CLASS_CONTEXT.get(
+            asset_class,
+            "Blend macro, positioning, and technical context relevant to this instrument.",
+        )
         
-        # Build comprehensive prompt
-        system_prompt = """You are a crypto market analyst with access to real-time information.
-        
+        system_prompt = f"""You are a market analyst with access to real-time information.
+
+Asset Class: {asset_class}
+Instrument: {instrument_label}
+
 Provide comprehensive market intelligence covering:
 1. Recent news and events (last 7 days)
-2. Current market sentiment
-3. Major developments or catalysts
-4. Technical analysis context
-5. Risk factors to watch
+2. Current market sentiment and positioning shifts
+3. Major developments or catalysts to track
+4. Technical and quantitative context aligned with the detected regime
+5. Risk factors that could trigger a regime shift
+
+Context focus: {context_instructions}
 
 Be specific, cite sources when possible, focus on actionable insights."""
 
@@ -127,7 +170,7 @@ Be specific, cite sources when possible, focus on actionable insights."""
         
         price_context = f"Current price: ${current_price:.2f}" if current_price else "Price data analyzed"
         
-        user_prompt = f"""Analyze {clean_symbol} cryptocurrency market intelligence:
+        user_prompt = f"""Analyze {instrument_label} market intelligence:
 
 **Technical Regime Analysis:**
 - Detected Regime: {regime_label} ({confidence:.0%} confidence)
@@ -142,8 +185,8 @@ Be specific, cite sources when possible, focus on actionable insights."""
    - Market-moving events
 
 2. **Current Market Sentiment:**
-   - Overall crypto market conditions
-   - {clean_symbol}-specific sentiment
+   - Overall {asset_class.title()} market conditions
+   - {instrument_label} specific sentiment or flows
    - Social media buzz or concerns
 
 3. **Technical Context:**
@@ -169,8 +212,59 @@ Provide a concise but comprehensive market intelligence report (4-5 paragraphs).
                 return self._generate_openai(user_prompt, system_prompt)
         except Exception as e:
             logger.error(f"Market intelligence generation failed: {e}")
-            return self._fallback_intelligence(symbol, regime_data)
+            return self._fallback_intelligence(symbol, regime_data, asset_class, instrument_label)
     
+    def generate_trading_guidance(
+        self,
+        symbol: str,
+        regime_label: str,
+        confidence: float,
+        asset_class: str = "UNKNOWN",
+        instrument_label: Optional[str] = None,
+    ) -> str:
+        """
+        Generate concise trading guidance focused on the detected regime.
+        """
+        if not self.enabled:
+            return self._fallback_guidance(symbol, regime_label, confidence, asset_class, instrument_label)
+
+        asset_class = (asset_class or "UNKNOWN").upper()
+        instrument_label = instrument_label or _default_instrument_label(symbol, asset_class)
+        context_instructions = ASSET_CLASS_CONTEXT.get(
+            asset_class,
+            "Blend macro, positioning, and technical context relevant to this instrument.",
+        )
+
+        system_prompt = f"""You are a disciplined market strategist.
+
+Goal: Provide risk-aware trading guidance grounded in statistical regimes.
+
+Asset Class: {asset_class}
+Instrument: {instrument_label}
+Confidence: {confidence:.0%}
+
+Key considerations: {context_instructions}
+
+Deliver a succinct three-part answer: Bias & Evidence, Key Levels/Catalysts, and Risk Management."""
+
+        user_prompt = f"""Detected Regime: {regime_label}
+Confidence: {confidence:.0%}
+
+Compose trading guidance covering:
+1. Bias & Evidence — Position bias (long/short/neutral) and 2-3 supporting datapoints.
+2. Key Levels or Catalysts — Levels to watch, upcoming events, or flow triggers.
+3. Risk Management — Hedging ideas, invalidation triggers, sizing notes.
+
+Limit the response to ~200 words."""
+
+        try:
+            if self.provider == "perplexity":
+                return self._generate_perplexity(user_prompt, system_prompt)
+            return self._generate_openai(user_prompt, system_prompt)
+        except Exception as exc:
+            logger.error(f"Trading guidance generation failed: {exc}")
+            return self._fallback_guidance(symbol, regime_label, confidence, asset_class, instrument_label)
+
     def generate(self, prompt: str, system_prompt: str = None, max_tokens: int = 1000, temperature: float = 0.6) -> str:
         """
         Generate text using configured provider.
@@ -248,12 +342,20 @@ Provide a concise but comprehensive market intelligence report (4-5 paragraphs).
         
         return content
     
-    def _fallback_intelligence(self, symbol: str, regime_data: Dict) -> str:
+    def _fallback_intelligence(
+        self,
+        symbol: str,
+        regime_data: Dict,
+        asset_class: str = "UNKNOWN",
+        instrument_label: Optional[str] = None,
+    ) -> str:
         """Fallback when LLM not available"""
         regime_label = regime_data.get('label', 'unknown')
         confidence = regime_data.get('confidence', 0)
+        asset_class = (asset_class or "UNKNOWN").upper()
+        instrument_label = instrument_label or _default_instrument_label(symbol, asset_class)
         
-        return f"""**Market Intelligence for {symbol}**
+        return f"""**Market Intelligence for {instrument_label} ({asset_class})**
 
 **Technical Regime:** {regime_label} ({confidence:.0%} confidence)
 
@@ -266,6 +368,24 @@ _Market intelligence with real-time news requires API access._
 For complete market intelligence with news, sentiment, and events, please configure an API key.
 """
 
+    def _fallback_guidance(
+        self,
+        symbol: str,
+        regime_label: str,
+        confidence: float,
+        asset_class: str = "UNKNOWN",
+        instrument_label: Optional[str] = None,
+    ) -> str:
+        """Fallback guidance when LLM is unavailable."""
+        asset_class = (asset_class or "UNKNOWN").upper()
+        instrument_label = instrument_label or _default_instrument_label(symbol, asset_class)
+
+        return f"""**Guidance for {instrument_label} ({asset_class})**
+
+- Detected regime: {regime_label} ({confidence:.0%} confidence)
+- Bias: Stay adaptive; no qualitative guidance available without LLM access.
+- Action: Monitor quantitative triggers and configure PERPLEXITY_API_KEY for richer guidance."""
+
 
 # Singleton
 _market_intel_client: Optional[MarketIntelligenceLLM] = None
@@ -277,4 +397,3 @@ def get_market_intelligence_client(provider: str = "perplexity") -> MarketIntell
     if _market_intel_client is None:
         _market_intel_client = MarketIntelligenceLLM(provider=provider)
     return _market_intel_client
-

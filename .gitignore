@@ -67,6 +67,9 @@ htmlcov/
 .dmypy.json
 dmypy.json
 
+# Local cache directories
+.cache/
+
 # Data (cached market data - can be regenerated)
 data/*/
 !data/.gitkeep
@@ -88,3 +91,5 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+config/.alpaca_credentials.txt
+config/.execution_config

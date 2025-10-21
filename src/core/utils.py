@@ -130,6 +130,37 @@ def get_polygon_api_key() -> str:
     return api_key or ""
 
 
+def get_alpaca_credentials() -> Dict[str, Optional[str]]:
+    """
+    Get Alpaca credentials and defaults from environment.
+    
+    Returns:
+        Dict with key_id, secret_key, base_url, data_feed
+    """
+    key_id = (
+        get_env_var("ALPACA_KEY_ID", required=False)
+        or get_env_var("ALPACA_API_KEY", required=False)
+        or get_env_var("APCA_API_KEY_ID", required=False)
+    )
+    secret_key = (
+        get_env_var("ALPACA_SECRET_KEY", required=False)
+        or get_env_var("ALPACA_API_SECRET", required=False)
+        or get_env_var("APCA_API_SECRET_KEY", required=False)
+    )
+
+    credentials = {
+        "key_id": key_id,
+        "secret_key": secret_key,
+        "base_url": get_env_var("ALPACA_BASE_URL", required=False),
+        "data_feed": get_env_var("ALPACA_DATA_FEED", required=False) or "iex",
+    }
+
+    if not credentials["key_id"] or not credentials["secret_key"]:
+        logger.warning("Alpaca credentials not fully configured; API calls may fail")
+
+    return credentials
+
+
 def get_openai_api_key() -> str:
     """Get OpenAI API key from environment"""
     return get_env_var("OPENAI_API_KEY", required=False) or ""
@@ -157,4 +188,3 @@ def get_perplexity_api_key() -> str:
     
     # Fallback to environment variable
     return get_env_var("PERPLEXITY_API_KEY", required=False) or ""
-

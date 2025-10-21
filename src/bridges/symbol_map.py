@@ -60,18 +60,39 @@ SYMBOL_MAP = {
     "NZD-USD": "NZDUSD",
     "NZD/USD": "NZDUSD",
     "NZDUSD": "NZDUSD",
+
+    # Equities / ETFs (internal → QC)
+    "SPY": "SPY",
+    "NYSE:SPY": "SPY",
+    "ARCA:SPY": "SPY",
+    "QQQ": "QQQ",
+    "NASDAQ:QQQ": "QQQ",
+    "AAPL": "AAPL",
+    "NASDAQ:AAPL": "AAPL",
+    "MSFT": "MSFT",
+    "NASDAQ:MSFT": "MSFT",
+    "TSLA": "TSLA",
+    "NASDAQ:TSLA": "TSLA",
+    "NVDA": "NVDA",
+    "NASDAQ:NVDA": "NVDA",
+    "META": "META",
+    "NASDAQ:META": "META",
 }
 
-# Reverse map (QC → internal)
-REVERSE_SYMBOL_MAP = {v: k for k, v in SYMBOL_MAP.items()}
+# Reverse map (QC → internal) - prefer first occurrence (canonical)
+REVERSE_SYMBOL_MAP = {}
+for internal, qc in SYMBOL_MAP.items():
+    REVERSE_SYMBOL_MAP.setdefault(qc, internal)
 
 # Asset class detection
 CRYPTO_SYMBOLS = {"BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD"}
 FX_SYMBOLS = {"EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD", "USDCHF", "EURGBP", "EURJPY", "GBPJPY"}
+EQUITY_SYMBOLS = {"SPY", "QQQ", "AAPL", "MSFT", "TSLA", "NVDA", "META"}
 
 # Venue defaults
 DEFAULT_CRYPTO_VENUE = "GDAX"  # Coinbase Pro in QC
 DEFAULT_FX_VENUE = "Oanda"  # Oanda in QC
+DEFAULT_EQUITY_VENUE = "USA"  # US equities default
 
 
 def to_qc_symbol(internal_symbol: str) -> str:
@@ -157,11 +178,17 @@ def detect_asset_class(symbol: str) -> str:
         return "CRYPTO"
     elif qc_symbol in FX_SYMBOLS:
         return "FX"
+    elif qc_symbol in EQUITY_SYMBOLS:
+        return "EQUITY"
     else:
-        # Default heuristic: if ends with USD and starts with 3 chars, likely crypto
-        if qc_symbol.endswith("USD") and len(qc_symbol) <= 7:
-            return "CRYPTO"
-        return "FX"
+        # Heuristics for unknown symbols
+        if qc_symbol.isalpha() and 1 <= len(qc_symbol) <= 5:
+            # Assume US equity-style ticker
+            return "EQUITY"
+        if qc_symbol.endswith("USD"):
+            # Default to FX for currency pairs not in map
+            return "FX"
+        return "CRYPTO"
 
 
 def get_default_venue(symbol: str) -> str:
@@ -184,6 +211,8 @@ def get_default_venue(symbol: str) -> str:
     
     if asset_class == "CRYPTO":
         return DEFAULT_CRYPTO_VENUE
+    elif asset_class == "EQUITY":
+        return DEFAULT_EQUITY_VENUE
     else:
         return DEFAULT_FX_VENUE
 
@@ -209,4 +238,3 @@ def parse_symbol_info(internal_symbol: str) -> Tuple[str, str, str]:
     venue = get_default_venue(qc_symbol)
     
     return qc_symbol, asset_class, venue
-

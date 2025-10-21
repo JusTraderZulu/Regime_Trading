@@ -816,12 +816,18 @@ def test_multiple_strategies(
 
     for spec in strategy_specs:
         strategy_name = spec["name"]
-        param_grid = spec["params"]
+        param_grid = spec.get("params", {})
         logger.info(f"  Testing {strategy_name} with param grid...")
 
         # Generate all combinations of parameters
-        keys, values = zip(*param_grid.items())
-        param_combinations = [dict(zip(keys, v)) for v in itertools.product(*values)]
+        if not param_grid:
+            param_combinations = [{}]
+        else:
+            keys, values = zip(*param_grid.items())
+            if any(len(v) == 0 for v in values):
+                logger.warning(f"    Param grid for {strategy_name} contains empty options; skipping strategy.")
+                continue
+            param_combinations = [dict(zip(keys, v)) for v in itertools.product(*values)]
 
         best_strategy_result = None
 

@@ -138,28 +138,28 @@ class RegimeSignalsAlgo(QCAlgorithm):
 # Placeholder for signals data (will be replaced by pipeline)
 SIGNALS_DATA_PLACEHOLDER = [
     {
-        "time": "2025-10-10T00:00:00Z",
-        "symbol": "EURUSD",
-        "regime": "mean_reverting",
-        "side": 0,
-        "weight": 0.0,
-        "confidence": 0.4
+        "time": "2025-10-16T00:00:00Z",
+        "symbol": "XRPUSD",
+        "regime": "volatile_trending",
+        "side": 1,
+        "weight": 0.675,
+        "confidence": 0.675
     },
     {
-        "time": "2025-10-10T20:00:00Z",
-        "symbol": "EURUSD",
-        "regime": "mean_reverting",
-        "side": 0,
-        "weight": 0.0,
-        "confidence": 0.4
-    },
-    {
-        "time": "2025-10-10T20:45:00Z",
-        "symbol": "EURUSD",
+        "time": "2025-10-16T00:00:00Z",
+        "symbol": "XRPUSD",
         "regime": "trending",
         "side": 1,
         "weight": 0.35,
         "confidence": 0.35
+    },
+    {
+        "time": "2025-10-16T03:00:00Z",
+        "symbol": "XRPUSD",
+        "regime": "mean_reverting",
+        "side": 0,
+        "weight": 0.0,
+        "confidence": 0.4
     }
 ]
 

@@ -21,6 +21,7 @@ class RegimeSignalsAlgo(QCAlgorithm):
         # Universe of assets (from company config)
         self.crypto_symbols = ["BTCUSD", "ETHUSD"]
         self.fx_symbols = ["EURUSD", "GBPUSD", "USDJPY"]
+        self.equity_symbols = ["SPY", "QQQ", "AAPL", "MSFT"]
         
         # Subscribe to crypto (using Coinbase/GDAX)
         for symbol in self.crypto_symbols:
@@ -30,6 +31,13 @@ class RegimeSignalsAlgo(QCAlgorithm):
         for symbol in self.fx_symbols:
             try:
                 self.AddForex(symbol, Resolution.Hour, Market.Oanda)
+            except:
+                self.Debug(f"Could not add {symbol}")
+        
+        # Subscribe to equities (using USA market)
+        for symbol in self.equity_symbols:
+            try:
+                self.AddEquity(symbol, Resolution.Hour, Market.USA)
             except:
                 self.Debug(f"Could not add {symbol}")
         
@@ -87,6 +95,8 @@ class RegimeSignalsAlgo(QCAlgorithm):
             if symbol_str in self.crypto_symbols:
                 qc_symbol = self.Symbol(symbol_str)
             elif symbol_str in self.fx_symbols:
+                qc_symbol = self.Symbol(symbol_str)
+            elif symbol_str in self.equity_symbols:
                 qc_symbol = self.Symbol(symbol_str)
             else:
                 self.Debug(f"Unknown symbol: {symbol_str}")
@@ -199,4 +209,3 @@ class TargetVolPortfolio:
     TODO: Implement proper vol scaling and position sizing.
     """
     pass
-

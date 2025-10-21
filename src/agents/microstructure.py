@@ -11,7 +11,7 @@ from datetime import datetime
 import pandas as pd
 
 from src.core.state import PipelineState
-from src.core.schemas import Tier, MicrostructureFeatures
+from src.core.schemas import Tier, MicrostructureFeatures, MicrostructureSummary
 from src.tools.microstructure import create_microstructure_features
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,11 @@ def microstructure_agent_node(state: PipelineState) -> PipelineState:
 
         if not mi_config.get('enabled', False):
             logger.info("Microstructure analysis disabled in config")
+            return state
+
+        asset_class = state.get("asset_class")
+        if asset_class and asset_class.upper() != "CRYPTO":
+            logger.info(f"Microstructure analysis skipped for asset class {asset_class}")
             return state
 
         # Get the tiers to analyze (default to ST for microstructure)

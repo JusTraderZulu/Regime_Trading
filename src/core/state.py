@@ -18,6 +18,7 @@ from src.core.schemas import (
     JudgeReport,
     MicrostructureFeatures,
     RegimeDecision,
+    StochasticForecastResult,
     StrategySpec,
     Tier,
 )
@@ -35,16 +36,21 @@ class PipelineState(TypedDict, total=False):
     run_mode: str  # "fast" or "thorough"
     st_bar: Optional[str]  # Override ST bar (e.g. "1h")
     timestamp: datetime
+    asset_class: Optional[str]
+    venue: Optional[str]
 
     # === Data (per tier) ===
     data_lt: Optional[DataFrame]  # LT price data
     data_mt: Optional[DataFrame]  # MT price data
     data_st: Optional[DataFrame]  # ST price data
+    data_us: Optional[DataFrame]  # Ultra-short (5m) price data
+    data_micro: Optional[DataFrame]  # 1m execution buffer
 
     # === Features (per tier) ===
     features_lt: Optional[FeatureBundle]
     features_mt: Optional[FeatureBundle]
     features_st: Optional[FeatureBundle]
+    features_us: Optional[FeatureBundle]
 
     # === CCM Context (per tier) ===
     ccm_lt: Optional[CCMSummary]
@@ -60,6 +66,7 @@ class PipelineState(TypedDict, total=False):
     regime_lt: Optional[RegimeDecision]
     regime_mt: Optional[RegimeDecision]
     regime_st: Optional[RegimeDecision]
+    regime_us: Optional[RegimeDecision]
 
     # === Strategy (per tier) ===
     strategy_lt: Optional[StrategySpec]
@@ -90,6 +97,7 @@ class PipelineState(TypedDict, total=False):
 
     # === Final Report ===
     exec_report: Optional[ExecReport]
+    stochastic: Optional[StochasticForecastResult]
 
     # === Artifacts ===
     artifacts_dir: Optional[str]
@@ -101,6 +109,10 @@ class PipelineState(TypedDict, total=False):
     qc_backtest_result: Optional[Any]  # QCBacktestResult
     qc_backtest_id: Optional[str]
     qc_project_id: Optional[str]
+
+    # === Diagnostics / Metrics ===
+    execution_metrics: Optional[Dict[str, Any]]
+    equity_meta: Optional[Dict[str, Any]]
 
     # === Config ===
     config: Optional[Dict[str, Any]]
@@ -134,19 +146,26 @@ def create_initial_state(
         progress=progress,
         messages=[],
         technical_levels=None,
+        asset_class=None,
+        venue=None,
+        equity_meta=None,
         # All other fields default to None
         data_lt=None,
         data_mt=None,
         data_st=None,
+        data_us=None,
+        data_micro=None,
         features_lt=None,
         features_mt=None,
         features_st=None,
+        features_us=None,
         ccm_lt=None,
         ccm_mt=None,
         ccm_st=None,
         regime_lt=None,
         regime_mt=None,
         regime_st=None,
+        regime_us=None,
         strategy_lt=None,
         strategy_mt=None,
         strategy_st=None,
@@ -156,6 +175,8 @@ def create_initial_state(
         contradictor_st=None,
         judge_report=None,
         exec_report=None,
+        stochastic=None,
         artifacts_dir=None,
         dual_llm_research=None,
+        execution_metrics=None,
     )

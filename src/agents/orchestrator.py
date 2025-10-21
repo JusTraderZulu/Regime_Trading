@@ -4,18 +4,36 @@ Orchestrator - Coordinates pipeline flow and contains regime detection logic.
 
 import json
 import logging
+import math
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from src.core.schemas import FeatureBundle, RegimeDecision, RegimeLabel, Tier
+import pandas as pd
+import pytz
+
+from src.core.schemas import (
+    ConflictFlags,
+    EnsembleSnapshot,
+    FeatureBundle,
+    RegimeDecision,
+    RegimeGates,
+    RegimeLabel,
+    RegimeMeta,
+    SessionWindow,
+    Tier,
+    VolatilitySnapshot,
+)
 from src.core.state import PipelineState
+from src.core.stochastic import infer_dt_from_bar, run_stochastic_forecast
 from src.core.utils import create_artifacts_dir
 from src.core.progress import track_node
+from src.bridges.symbol_map import parse_symbol_info
 from src.tools.backtest import backtest, walk_forward_analysis, test_multiple_strategies
-from src.tools.data_loaders import get_polygon_bars, fetch_quotes_data
+from src.tools.data_loaders import get_polygon_bars, fetch_quotes_data, get_alpaca_bars
 from src.tools.features import compute_feature_bundle
 from src.tools.levels import compute_technical_levels
+from src.tools.events import active_events, load_macro_events
 from src.tools.regime_hysteresis import (
     apply_hysteresis,
     load_regime_memory,
@@ -23,6 +41,323 @@ from src.tools.regime_hysteresis import (
 )
 
 logger = logging.getLogger(__name__)
+
+TIER_ORDER = ["LT", "MT", "ST", "US"]
+BAR_FREQ_ALIASES = {
+    "1m": "1min",
+    "5m": "5min",
+    "15m": "15min",
+    "30m": "30min",
+    "1h": "1h",
+    "4h": "4h",
+    "1d": "1d",
+}
+
+
+def _normalize_bar(bar: str) -> str:
+    return bar.lower().replace(" ", "")
+
+
+def _align_to_sessions(df: Optional[pd.DataFrame], bar: str) -> Optional[pd.DataFrame]:
+    """Normalize timestamps to UTC and align to bar boundary sessions."""
+    if df is None or df.empty:
+        return df
+
+    normalized = df.copy()
+    try:
+        normalized.index = normalized.index.tz_convert(pytz.UTC)
+    except AttributeError:
+        normalized.index = normalized.index.tz_localize(pytz.UTC)
+
+    freq_alias = BAR_FREQ_ALIASES.get(_normalize_bar(bar))
+    if freq_alias:
+        floored_index = normalized.index.floor(freq_alias)
+        normalized.index = floored_index
+        normalized = normalized[~normalized.index.duplicated(keep="last")]
+
+    return normalized.sort_index()
+
+
+def _active_tiers(config: Dict) -> List[str]:
+    """Determine active analysis tiers based on config order and availability."""
+    timeframes = config.get("timeframes", {})
+    configured_order = config.get("regime", {}).get("tier_order", TIER_ORDER)
+    return [tier for tier in configured_order if tier in timeframes]
+
+
+def _compute_returns(df: Optional[pd.DataFrame]) -> pd.Series:
+    if df is None or df.empty:
+        return pd.Series(dtype=float)
+    returns = df["close"].pct_change().dropna()
+    return returns.astype(float)
+
+
+def _compute_volatility_snapshot(
+    df: Optional[pd.DataFrame],
+    tier_cfg: Dict,
+    volatility_cfg: Dict,
+) -> VolatilitySnapshot:
+    returns = _compute_returns(df)
+    if returns.empty:
+        return VolatilitySnapshot(sigma=None, sigma_ref=None, scale=None)
+
+    lam = float(volatility_cfg.get("lambda", 0.94))
+    alpha = max(1e-5, 1.0 - lam)
+    ewma_series = returns.ewm(alpha=alpha).std().dropna()
+    sigma = float(ewma_series.iloc[-1]) if not ewma_series.empty else float(returns.std())
+
+    ref_window = tier_cfg.get("sigma_ref_window") or volatility_cfg.get("ref_window")
+    sigma_ref = float(returns.std())
+    if ref_window:
+        ref_window = max(int(ref_window), 5)
+        rolling = returns.rolling(ref_window).std().dropna()
+        if not rolling.empty:
+            sigma_ref = float(rolling.median())
+
+    ref_floor = float(volatility_cfg.get("ref_floor", 1e-4))
+    if sigma_ref is None or sigma_ref < ref_floor:
+        sigma_ref = ref_floor
+
+    scale = sigma / sigma_ref if sigma_ref else None
+    return VolatilitySnapshot(sigma=sigma, sigma_ref=sigma_ref, scale=scale)
+
+
+def _equity_dt_per_bar(bar: Optional[str]) -> Optional[float]:
+    if not bar:
+        return None
+    token = str(bar).strip().lower()
+    trading_minutes = 390.0  # Regular session minutes (6.5h)
+    try:
+        if token.endswith("d"):
+            return float(token[:-1])
+        if token.endswith("h"):
+            hours = float(token[:-1])
+            return (hours * 60.0) / trading_minutes
+        if token.endswith("min"):
+            minutes = float(token[:-3])
+            return minutes / trading_minutes
+        if token.endswith("m"):
+            minutes = float(token[:-1])
+            return minutes / trading_minutes
+    except ValueError:
+        return None
+    return None
+
+
+def _estimate_posterior(
+    decision: RegimeDecision,
+    gates: Optional[RegimeGates],
+    vol_snapshot: Optional[VolatilitySnapshot],
+    posterior_cfg: Dict,
+) -> float:
+    base = float(decision.confidence)
+    margin_weight = float(posterior_cfg.get("margin_weight", 0.5))
+    volatility_weight = float(posterior_cfg.get("volatility_weight", 0.2))
+    gate_penalty_weight = float(posterior_cfg.get("gate_penalty", 0.3))
+
+    vote_margin = float(decision.vote_margin or 0.0)
+    score = base + margin_weight * vote_margin
+
+    if vol_snapshot and vol_snapshot.scale is not None:
+        score += volatility_weight * (1.0 - float(vol_snapshot.scale))
+
+    gate_penalty = 0.0
+    if gates:
+        if gates.p_min is not None:
+            gate_penalty += max(0.0, float(gates.p_min) - base)
+        if gates.enter is not None:
+            gate_penalty += max(0.0, float(gates.enter) - base)
+    score -= gate_penalty_weight * gate_penalty
+
+    score = max(0.0, min(1.0, score))
+
+    a = float(posterior_cfg.get("a", 3.0))
+    b = float(posterior_cfg.get("b", -1.5))
+    try:
+        value = 1.0 / (1.0 + math.exp(-(a * score + b)))
+    except OverflowError:
+        value = 1.0 if (a * score + b) > 0 else 0.0
+    return max(0.0, min(1.0, value))
+
+
+def _compute_dynamic_p_min(tier_cfg: Dict, vol_snapshot: Optional[VolatilitySnapshot]) -> Optional[float]:
+    if not tier_cfg:
+        return None
+    p0 = float(tier_cfg.get("p0", 0.55))
+    k = float(tier_cfg.get("k", 0.05))
+    floor = float(tier_cfg.get("floor", 0.5))
+    cap = float(tier_cfg.get("cap", 0.8))
+    scale = getattr(vol_snapshot, "scale", None)
+    if scale is None or math.isnan(scale):
+        dynamic = p0
+    else:
+        dynamic = p0 + k * scale
+    return max(floor, min(cap, dynamic))
+
+
+def _build_regime_meta(decision: RegimeDecision) -> RegimeMeta:
+    ts = decision.timestamp
+    if ts.tzinfo is None:
+        ts = pytz.UTC.localize(ts)
+    else:
+        ts = ts.astimezone(pytz.UTC)
+    session_start = ts.replace(hour=0, minute=0, second=0, microsecond=0)
+    session_end = session_start + timedelta(days=1)
+    session = SessionWindow(start_utc=session_start, end_utc=session_end)
+    return RegimeMeta(tier=decision.tier, asof_utc=ts, session=session)
+
+
+DEFAULT_ENSEMBLE_MODELS = ["sticky_hmm", "hsmm", "tvtp"]
+
+
+def _enrich_regime_decision(
+    decision: RegimeDecision,
+    tier_cfg: Dict,
+    gating_cfg: Dict,
+    data_df: Optional[pd.DataFrame],
+) -> RegimeDecision:
+    gating_enabled = gating_cfg.get("enabled", False)
+    volatility_cfg = gating_cfg.get("volatility", {})
+    posterior_cfg = gating_cfg.get("posterior", {})
+
+    vol_snapshot = None
+    dynamic_p_min = None
+
+    if gating_enabled and tier_cfg:
+        vol_snapshot = _compute_volatility_snapshot(data_df, tier_cfg, volatility_cfg)
+        dynamic_p_min = _compute_dynamic_p_min(tier_cfg, vol_snapshot)
+
+    gate_reasons = decision.gate_reasons or []
+
+    gates = None
+    if tier_cfg:
+        gates = RegimeGates(
+            p_min=dynamic_p_min,
+            enter=tier_cfg.get("enter"),
+            exit=tier_cfg.get("exit"),
+            m_bars=tier_cfg.get("m_bars"),
+            min_remaining=tier_cfg.get("min_remaining"),
+            reasons=gate_reasons or None,
+        )
+
+    posterior_p = round(
+        _estimate_posterior(decision, gates, vol_snapshot, posterior_cfg), 4
+    )
+
+    expected_remaining = None
+    required_bars = (gates.m_bars if gates and gates.m_bars is not None else tier_cfg.get("m_bars") if tier_cfg else None)
+    gate_active = bool(gate_reasons)
+    if (
+        gates
+        and gates.min_remaining is not None
+        and required_bars
+        and decision.confirmation_streak is not None
+        and decision.confirmation_streak >= required_bars
+        and not gate_active
+    ):
+        expected_remaining = gates.min_remaining
+
+    meta = _build_regime_meta(decision)
+    ensemble = decision.ensemble or EnsembleSnapshot(models=DEFAULT_ENSEMBLE_MODELS, agreement_score=None)
+    conflicts = decision.conflicts or ConflictFlags()
+
+    vol_snapshot_payload = (
+        vol_snapshot
+        if vol_snapshot
+        and any(value is not None for value in vol_snapshot.model_dump().values())
+        else None
+    )
+
+    update_payload = {
+        "posterior_p": posterior_p,
+        "gates": gates,
+        "volatility": vol_snapshot_payload,
+        "meta": meta,
+        "ensemble": ensemble,
+        "expected_remaining_time": expected_remaining,
+        "conflicts": conflicts,
+    }
+
+    rationale_notes = []
+    if posterior_p is not None:
+        rationale_notes.append(f"posterior={posterior_p:.2f}")
+    if dynamic_p_min is not None:
+        rationale_notes.append(f"p_min={dynamic_p_min:.2f}")
+    if gates and gates.m_bars:
+        rationale_notes.append(f"m_bars={gates.m_bars}")
+    if rationale_notes:
+        update_payload["rationale"] = decision.rationale + " | Gates: " + ", ".join(rationale_notes)
+
+    return decision.model_copy(update={k: v for k, v in update_payload.items() if v is not None})
+
+
+def _enforce_multi_timeframe_alignment(
+    results: Dict[str, Optional[RegimeDecision]],
+    config: Dict,
+) -> None:
+    mtf_cfg = config.get("regime", {}).get("multi_timeframe", {})
+    if not mtf_cfg.get("enabled", False):
+        return
+
+    reference_tier = mtf_cfg.get("reference_tier", "MT").lower()
+    confirm_tiers = mtf_cfg.get("confirmation_tiers", [])
+    allow_reference_neutral = mtf_cfg.get("allow_reference_neutral", True)
+    min_ref_conf = mtf_cfg.get("min_reference_confidence", 0.0)
+    policy = mtf_cfg.get("disagreement_policy", "defer")
+
+    reference_key = f"regime_{reference_tier}"
+    reference_decision = results.get(reference_key)
+    if not reference_decision:
+        return
+
+    reference_label = reference_decision.label
+    reference_conf = reference_decision.confidence
+
+    for tier_str in confirm_tiers:
+        tier_key = tier_str.lower()
+        decision_key = f"regime_{tier_key}"
+        decision = results.get(decision_key)
+        if not decision:
+            continue
+
+        conflict_flags = decision.conflicts or ConflictFlags()
+        conflict_flags.higher_tf_disagree = False
+
+        # Skip enforcement if reference is uncertain/low confidence and allowed
+        if allow_reference_neutral and reference_label == RegimeLabel.UNCERTAIN:
+            results[decision_key] = decision.model_copy(update={"conflicts": conflict_flags})
+            continue
+        if reference_conf < min_ref_conf:
+            results[decision_key] = decision.model_copy(update={"conflicts": conflict_flags})
+            continue
+
+        if decision.label == reference_label:
+            results[decision_key] = decision.model_copy(update={"conflicts": conflict_flags})
+            continue
+
+        conflict_flags.higher_tf_disagree = True
+        rationale_note = (
+            f" | Alignment: {tier_str}={decision.label.value} vs {mtf_cfg.get('reference_tier', 'MT')}="
+            f"{reference_label.value}"
+        )
+
+        final_label = decision.label
+        final_confidence = min(decision.confidence, reference_conf)
+        if policy == "defer":
+            final_label = RegimeLabel.UNCERTAIN
+        elif policy == "override":
+            final_label = reference_label
+
+        updated = decision.model_copy(
+            update={
+                "label": final_label,
+                "state": final_label.value,
+                "confidence": final_confidence,
+                "conflicts": conflict_flags,
+                "rationale": decision.rationale + rationale_note,
+            }
+        )
+        results[decision_key] = updated
 
 
 # ============================================================================
@@ -50,12 +385,27 @@ def load_data_node(state: PipelineState) -> Dict:
         timeframes = config.get("timeframes", {})
 
         results = {}
+        equity_meta: Dict[str, Dict[str, Any]] = {}
+        active_tiers = _active_tiers(config)
+        qc_symbol, asset_class, venue = parse_symbol_info(symbol)
+        equities_cfg = config.get("equities", {})
+        equities_timeframes = equities_cfg.get("timeframes", {})
+        data_source_cfg = config.get("data_source", {})
+        equity_provider = data_source_cfg.get("equities", "alpaca").lower()
+        equity_feed = data_source_cfg.get("equities_feed", "iex")
 
-        for tier_str in ["LT", "MT", "ST"]:
+        results["asset_class"] = asset_class
+        results["venue"] = venue
+
+        for tier_str in active_tiers:
             tier_key = tier_str.lower()
             tier_config = timeframes.get(tier_str, {})
             bar = tier_config.get("bar", "1d")
             lookback = tier_config.get("lookback", 365)
+            if asset_class == "EQUITY":
+                eq_override = equities_timeframes.get(tier_str, {})
+                bar = eq_override.get("bar", bar)
+                lookback = eq_override.get("lookback", lookback)
 
             # Override ST bar if specified
             if tier_str == "ST" and st_bar_override:
@@ -63,33 +413,89 @@ def load_data_node(state: PipelineState) -> Dict:
                 logger.info(f"ST bar overridden to {bar}")
 
             try:
-                df = get_polygon_bars(symbol, bar, lookback_days=lookback)
-                results[f"data_{tier_key}"] = df
-                logger.info(f"Loaded {len(df)} bars for {tier_str} ({bar})")
+                if asset_class == "EQUITY" and equity_provider == "alpaca":
+                    df, meta = get_alpaca_bars(
+                        symbol=qc_symbol,
+                        bar=bar,
+                        lookback_days=lookback,
+                        include_premarket=equities_cfg.get("include_premarket", False),
+                        include_postmarket=equities_cfg.get("include_postmarket", False),
+                        tz=equities_cfg.get("tz", "America/New_York"),
+                        adjustment=equities_cfg.get("adjustment", "all"),
+                        feed=equity_feed,
+                    )
+                    df = _align_to_sessions(df, bar)
+                    results[f"data_{tier_key}"] = df
+                    meta.update({"feed": equity_feed, "tier": tier_str})
+                    equity_meta[tier_str] = meta
+                    logger.info(f"Loaded {len(df)} Alpaca bars for {tier_str} ({bar})")
+                else:
+                    df = get_polygon_bars(symbol, bar, lookback_days=lookback)
+                    df = _align_to_sessions(df, bar)
+                    results[f"data_{tier_key}"] = df
+                    logger.info(f"Loaded {len(df)} Polygon bars for {tier_str} ({bar})")
 
-                # Also fetch quotes data for microstructure analysis (for crypto)
-                if symbol.startswith('X:'):  # Crypto symbols
-                    try:
-                        from src.tools.data_loaders import fetch_quotes_data
-                        end_date = datetime.now().strftime('%Y-%m-%d')
-                        start_date = (datetime.now() - timedelta(days=min(lookback, 7))).strftime('%Y-%m-%d')  # Last 7 days for quotes
+                    # Also fetch quotes data for microstructure analysis (for crypto)
+                    if asset_class == "CRYPTO" and symbol.startswith('X:'):
+                        try:
+                            end_date = datetime.now().strftime('%Y-%m-%d')
+                            start_date = (datetime.now() - timedelta(days=min(lookback, 7))).strftime('%Y-%m-%d')
 
-                        quotes_df = fetch_quotes_data(symbol, start_date, end_date)
-                        if not quotes_df.empty:
-                            # Save quotes data for microstructure analysis
-                            quotes_dir = Path("data") / "quotes"
-                            quotes_dir.mkdir(exist_ok=True)
-                            quotes_file = quotes_dir / f"{symbol.replace(':', '_')}_quotes_{end_date}.parquet"
-                            quotes_df.to_parquet(quotes_file)
-                            logger.info(f"✅ Saved {len(quotes_df)} quotes for microstructure analysis")
-                        else:
-                            logger.info("No quotes data available for microstructure analysis")
-                    except Exception as e:
-                        logger.warning(f"Failed to fetch quotes data: {e}")
+                            quotes_df = fetch_quotes_data(symbol, start_date, end_date)
+                            if not quotes_df.empty:
+                                quotes_dir = Path("data") / "quotes"
+                                quotes_dir.mkdir(exist_ok=True)
+                                quotes_file = quotes_dir / f"{symbol.replace(':', '_')}_quotes_{end_date}.parquet"
+                                quotes_df.to_parquet(quotes_file)
+                                logger.info(f"✅ Saved {len(quotes_df)} quotes for microstructure analysis")
+                            else:
+                                logger.info("No quotes data available for microstructure analysis")
+                        except Exception as quote_exc:
+                            logger.warning(f"Failed to fetch quotes data: {quote_exc}")
 
-            except Exception as e:
-                logger.error(f"Failed to load data for {tier_str}: {e}")
+            except Exception as exc:
+                logger.error(f"Failed to load data for {tier_str}: {exc}")
                 results[f"data_{tier_key}"] = None
+
+        # 1m execution buffer (no analysis, execution checks only)
+        exec_buffer_cfg = config.get("execution_buffer")
+        if exec_buffer_cfg:
+            micro_bar = exec_buffer_cfg.get("bar", "1m")
+            micro_lookback = exec_buffer_cfg.get("lookback", 2)
+            try:
+                if asset_class == "EQUITY" and equity_provider == "alpaca":
+                    df_micro, meta_micro = get_alpaca_bars(
+                        symbol=qc_symbol,
+                        bar=micro_bar,
+                        lookback_days=micro_lookback,
+                        include_premarket=equities_cfg.get("include_premarket", False),
+                        include_postmarket=equities_cfg.get("include_postmarket", False),
+                        tz=equities_cfg.get("tz", "America/New_York"),
+                        adjustment=equities_cfg.get("adjustment", "all"),
+                        feed=equity_feed,
+                    )
+                    df_micro = _align_to_sessions(df_micro, micro_bar)
+                    results["data_micro"] = df_micro
+                    meta_micro.update({"feed": equity_feed, "tier": "EXECUTION"})
+                    equity_meta["EXECUTION"] = meta_micro
+                    logger.info(f"Loaded {len(df_micro)} Alpaca bars for execution buffer ({micro_bar})")
+                else:
+                    df_micro = get_polygon_bars(symbol, micro_bar, lookback_days=micro_lookback)
+                    df_micro = _align_to_sessions(df_micro, micro_bar)
+                    results["data_micro"] = df_micro
+                    logger.info(f"Loaded {len(df_micro)} Polygon bars for execution buffer ({micro_bar})")
+            except Exception as exc:
+                logger.warning(f"Failed to load execution buffer data ({micro_bar}): {exc}")
+                results["data_micro"] = None
+
+        if equity_meta:
+            meta_payload = {
+                "symbol": qc_symbol,
+                "asset_class": asset_class,
+                "venue": venue,
+                "tiers": equity_meta,
+            }
+            results["equity_meta"] = meta_payload
 
         return results
 
@@ -117,10 +523,14 @@ def compute_features_node(state: PipelineState) -> Dict:
         timestamp = state["timestamp"]
 
         timeframes = config.get("timeframes", {})
+        asset_class = state.get("asset_class")
 
         results = {}
+        bars_used: Dict[str, str] = {}
 
-        for tier_str in ["LT", "MT", "ST"]:
+        active_tiers = _active_tiers(config)
+
+        for tier_str in active_tiers:
             tier = Tier(tier_str)
             tier_key = tier_str.lower()
 
@@ -136,6 +546,7 @@ def compute_features_node(state: PipelineState) -> Dict:
             # Override for ST
             if tier_str == "ST" and state.get("st_bar"):
                 bar = state["st_bar"]
+            bars_used[tier_str] = bar
 
             try:
                 features = compute_feature_bundle(
@@ -163,6 +574,50 @@ def compute_features_node(state: PipelineState) -> Dict:
         )
         results["technical_levels"] = technical_levels.to_dict()
 
+        stochastic_cfg = config.get("stochastic_forecast", {})
+        if stochastic_cfg.get("enabled"):
+            tier_closes: Dict[str, pd.Series] = {}
+            configured_tiers = set((stochastic_cfg.get("tiers") or {}).keys())
+            for tier_name in ["LT", "MT", "ST"]:
+                if configured_tiers and tier_name not in configured_tiers:
+                    continue
+                tier_key = tier_name.lower()
+                df = state.get(f"data_{tier_key}")
+                if df is None or df.empty or "close" not in df:
+                    continue
+                close_series = df["close"].dropna()
+                if close_series.empty:
+                    continue
+                tier_closes[tier_name] = close_series.astype(float)
+
+            if tier_closes:
+                tier_overrides: Dict[str, Dict[str, Any]] = {}
+                tiers_cfg = stochastic_cfg.get("tiers") or {}
+                for tier_name, bar_label in bars_used.items():
+                    override_payload: Dict[str, Any] = {}
+                    if bar_label:
+                        override_payload["bar"] = bar_label
+                    base_tier_cfg = tiers_cfg.get(tier_name, {})
+                    dt_value = None
+                    if (asset_class or "").upper() == "EQUITY":
+                        dt_value = _equity_dt_per_bar(bar_label)
+                    if not dt_value:
+                        dt_value = base_tier_cfg.get("dt_per_bar_days")
+                    if not dt_value:
+                        dt_value = infer_dt_from_bar(bar_label)
+                    if dt_value:
+                        override_payload["dt_per_bar_days"] = dt_value
+                    if override_payload:
+                        tier_overrides[tier_name] = override_payload
+
+                forecast = run_stochastic_forecast(
+                    tier_closes=tier_closes,
+                    settings=stochastic_cfg,
+                    tier_overrides=tier_overrides or None,
+                )
+                if forecast:
+                    results["stochastic"] = forecast
+
         return results
 
 
@@ -188,12 +643,30 @@ def detect_regime_node(state: PipelineState) -> Dict:
     symbol = state["symbol"]
 
     results = {}
-    hysteresis_config = config.get("regime", {}).get("hysteresis", {})
+    regime_config = config.get("regime", {})
+    hysteresis_config = dict(regime_config.get("hysteresis", {}))
+    gating_config = regime_config.get("gating", {})
+    events_config = regime_config.get("events", {})
+    tier_overrides = gating_config.get("tiers", {})
+    if tier_overrides:
+        hysteresis_config.setdefault("tier_overrides", tier_overrides)
+
     hysteresis_enabled = hysteresis_config.get("enabled", False)
     regime_memory = load_regime_memory() if hysteresis_enabled else {}
     memory_modified = False
 
-    for tier_str in ["LT", "MT", "ST"]:
+    macro_events: List[Dict[str, Any]] = []
+    if events_config.get("enabled", False):
+        calendar_paths = events_config.get("calendar_paths", [])
+        if isinstance(calendar_paths, str):
+            calendar_paths = [calendar_paths]
+        if not calendar_paths:
+            calendar_paths = ["data/events/macro_events.json"]
+        macro_events = load_macro_events(calendar_paths)
+
+    active_tiers = _active_tiers(config)
+
+    for tier_str in active_tiers:
         tier = Tier(tier_str)
         tier_key = tier_str.lower()
 
@@ -207,6 +680,8 @@ def detect_regime_node(state: PipelineState) -> Dict:
 
         try:
             regime = classify_regime(features, ccm, config, timestamp)
+            tier_cfg = tier_overrides.get(tier_str, {}) if tier_overrides else {}
+            data_df = state.get(f"data_{tier_key}")
             if hysteresis_enabled:
                 regime, regime_memory = apply_hysteresis(
                     decision=regime,
@@ -214,6 +689,35 @@ def detect_regime_node(state: PipelineState) -> Dict:
                     settings=hysteresis_config,
                 )
                 memory_modified = True
+            regime = _enrich_regime_decision(regime, tier_cfg, gating_config, data_df)
+
+            if events_config.get("enabled", False) and tier_str in events_config.get("tiers", []):
+                lead = int(events_config.get("lead_minutes", 30))
+                trail = int(events_config.get("trail_minutes", 60))
+                severity_floor = events_config.get("severity_floor", "high")
+                active_hits = active_events(timestamp, macro_events, lead, trail, severity_floor)
+                if active_hits:
+                    event_names = ", ".join(event.get("name", "event") for event in active_hits[:3])
+                    logger.info(
+                        "Event blackout active for %s %s: %s", symbol, tier_str, event_names
+                    )
+                    conflicts = regime.conflicts or ConflictFlags()
+                    conflicts.event_blackout = True
+                    if regime.gates:
+                        gate_update = regime.gates.model_copy(
+                            update={
+                                "p_min": min(0.95, ((regime.gates.p_min or 0.0) + 0.05)),
+                            }
+                        )
+                    else:
+                        gate_update = RegimeGates(p_min=0.6, m_bars=None, min_remaining=None)
+                    regime = regime.model_copy(
+                        update={
+                            "conflicts": conflicts,
+                            "gates": gate_update,
+                            "rationale": regime.rationale + f" | Event blackout: {event_names}",
+                        }
+                    )
             results[f"regime_{tier_key}"] = regime
             logger.info(
                 f"Regime {tier_str}: {regime.label.value} (confidence={regime.confidence:.2f})"
@@ -221,6 +725,50 @@ def detect_regime_node(state: PipelineState) -> Dict:
         except Exception as e:
             logger.error(f"Failed to detect regime for {tier_str}: {e}")
             results[f"regime_{tier_key}"] = None
+
+    _enforce_multi_timeframe_alignment(results, config)
+
+    def _has_blocker(decision: Optional[RegimeDecision]) -> bool:
+        if not decision or not decision.conflicts:
+            return False
+        flags = decision.conflicts
+        return any(
+            [
+                getattr(flags, "higher_tf_disagree", False),
+                getattr(flags, "event_blackout", False),
+                getattr(flags, "volatility_gate_block", False),
+                getattr(flags, "execution_blackout", False),
+            ]
+        )
+
+    regime_mt_final = results.get("regime_mt")
+    regime_st_final = results.get("regime_st")
+    regime_us_final = results.get("regime_us")
+
+    st_aligned = bool(
+        regime_st_final and regime_mt_final and regime_st_final.label == regime_mt_final.label
+    )
+    us_aligned = bool(
+        regime_us_final and regime_mt_final and regime_us_final.label == regime_mt_final.label
+    )
+
+    results["execution_metrics"] = {
+        "st_aligned": st_aligned,
+        "us_aligned": us_aligned,
+        "st_blocked": _has_blocker(regime_st_final),
+        "us_blocked": _has_blocker(regime_us_final),
+        "execution_ready": st_aligned and us_aligned and not (_has_blocker(regime_st_final) or _has_blocker(regime_us_final)),
+    }
+
+    if regime_st_final and not st_aligned:
+        conflicts = regime_st_final.conflicts or ConflictFlags()
+        conflicts.higher_tf_disagree = True
+        results["regime_st"] = regime_st_final.model_copy(update={"conflicts": conflicts})
+
+    if regime_us_final and not us_aligned:
+        conflicts = regime_us_final.conflicts or ConflictFlags()
+        conflicts.higher_tf_disagree = True
+        results["regime_us"] = regime_us_final.model_copy(update={"conflicts": conflicts})
 
     if memory_modified:
         save_regime_memory(regime_memory)
@@ -330,6 +878,13 @@ def classify_regime(
     # Select regime with highest vote
     label = max(votes, key=votes.get)
     base_confidence = votes[label]
+    sorted_vote_values = sorted(votes.values(), reverse=True)
+    vote_margin = 0.0
+    if sorted_vote_values:
+        if len(sorted_vote_values) == 1:
+            vote_margin = sorted_vote_values[0]
+        else:
+            vote_margin = sorted_vote_values[0] - sorted_vote_values[1]
     
     # Check for volatile trending (high vol + trending)
     high_vol_signal = False
@@ -363,7 +918,8 @@ def classify_regime(
     
     # Add Hurst CI if available
     if features.hurst_rs_lower is not None and features.hurst_rs_upper is not None:
-        rationale_parts.append(f"(CI: {features.hurst_rs_lower:.2f}-{features.hurst_rs_upper:.2f})")
+        lo, hi = sorted([features.hurst_rs_lower, features.hurst_rs_upper])
+        rationale_parts.append(f"(CI: {lo:.2f}-{hi:.2f})")
     
     # Add robust Hurst if different
     if features.hurst_robust is not None and abs(features.hurst_robust - hurst_avg) > 0.05:
@@ -397,6 +953,7 @@ def classify_regime(
         symbol=features.symbol,
         timestamp=timestamp,
         label=label,
+        state=label.value,
         confidence=confidence,
         hurst_avg=hurst_avg,
         vr_statistic=features.vr_statistic,
@@ -405,6 +962,7 @@ def classify_regime(
         macro_coupling=ccm.macro_coupling if ccm else None,
         rationale=rationale,
         base_label=label,
+        vote_margin=vote_margin,
     )
 
 

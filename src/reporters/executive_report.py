@@ -59,7 +59,7 @@ def _save_artifacts(state: PipelineState, artifacts_dir: Path) -> None:
     """Save all intermediate outputs as JSON artifacts"""
 
     # Features
-    for tier in ["lt", "mt", "st"]:
+    for tier in ["lt", "mt", "st", "us"]:
         features = state.get(f"features_{tier}")
         if features:
             save_json(
@@ -77,7 +77,7 @@ def _save_artifacts(state: PipelineState, artifacts_dir: Path) -> None:
             )
 
     # Regime
-    for tier in ["lt", "mt", "st"]:
+    for tier in ["lt", "mt", "st", "us"]:
         regime = state.get(f"regime_{tier}")
         if regime:
             save_json(
@@ -129,6 +129,13 @@ def _save_artifacts(state: PipelineState, artifacts_dir: Path) -> None:
             artifacts_dir / "judge_report.json",
         )
 
+    stochastic = state.get("stochastic")
+    if stochastic:
+        save_json(
+            stochastic.model_dump(),
+            artifacts_dir / "stochastic_outlook.json",
+        )
+
     # Exec report
     if state.get("exec_report"):
         save_json(
@@ -165,4 +172,3 @@ def write_report_to_disk(state: PipelineState) -> str:
 
     artifacts_dir = state.get("artifacts_dir", ".")
     return str(Path(artifacts_dir) / "report.md")
-

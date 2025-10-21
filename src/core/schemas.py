@@ -117,6 +117,54 @@ class FeatureBundle(BaseModel):
 
 
 # ============================================================================
+# Stochastic Forecast Results
+# ============================================================================
+
+
+class StochasticTierResult(BaseModel):
+    """Monte Carlo summary for a specific tier."""
+
+    tier: Tier
+    horizon_bars: int
+    horizon_days: float
+    dt_per_bar_days: float
+    sample_size: int
+    mu_day: float
+    sigma_day: float
+    prob_up: float = Field(ge=0.0, le=1.0)
+    expected_return: float
+    expected_move: float
+    return_std: Optional[float] = Field(default=None, description="Legacy std metric (deprecated)")
+    price_quantiles: Dict[str, float]
+    var_95: float
+    cvar_95: float
+    warnings: List[str] = Field(default_factory=list)
+
+
+class StochasticForecastResult(BaseModel):
+    """Container for per-tier stochastic outlook results."""
+
+    seed: int
+    num_paths: int
+    quantiles: List[float]
+    estimation: Dict[str, Any]
+    config_echo: Dict[str, Any] = Field(default_factory=dict)
+    by_tier: Dict[str, StochasticTierResult]
+    warnings: List[str] = Field(default_factory=list)
+
+    @field_validator("quantiles")
+    @classmethod
+    def _validate_quantiles(cls, values: List[float]) -> List[float]:
+        cleaned = []
+        for value in values:
+            numeric = float(value)
+            if not 0.0 <= numeric <= 1.0:
+                raise ValueError("Quantiles must be between 0 and 1")
+            cleaned.append(numeric)
+        return cleaned
+
+
+# ============================================================================
 # CCM (Cross-Asset Context) Summary
 # ============================================================================
 
@@ -167,6 +215,61 @@ class CCMSummary(BaseModel):
 
 
 # ============================================================================
+# Regime Metadata & Execution Context
+# ============================================================================
+
+
+class SessionWindow(BaseModel):
+    """Session boundary for aligned analysis."""
+
+    start_utc: datetime
+    end_utc: datetime
+
+
+class RegimeGates(BaseModel):
+    """Thresholds and confirmation requirements applied to regime transitions."""
+
+    p_min: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    enter: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    exit: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    m_bars: Optional[int] = Field(default=None, ge=0)
+    min_remaining: Optional[int] = Field(default=None, ge=0)
+    reasons: Optional[List[str]] = Field(default=None, description="Active gate constraints")
+
+
+class VolatilitySnapshot(BaseModel):
+    """Volatility context used to scale gates."""
+
+    sigma: Optional[float] = Field(default=None, ge=0.0)
+    sigma_ref: Optional[float] = Field(default=None, ge=0.0)
+    scale: Optional[float] = Field(default=None, ge=0.0)
+
+
+class EnsembleSnapshot(BaseModel):
+    """Placeholder for ensemble model agreement."""
+
+    models: List[str] = Field(default_factory=list)
+    agreement_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+
+class ConflictFlags(BaseModel):
+    """Flags describing gating conflicts that defer execution."""
+
+    higher_tf_disagree: bool = False
+    event_blackout: bool = False
+    volatility_gate_block: bool = False
+    execution_blackout: bool = False
+
+
+class RegimeMeta(BaseModel):
+    """Supplemental metadata for downstream systems."""
+
+    tier: Tier
+    asof_utc: datetime
+    session: Optional[SessionWindow] = None
+
+
+# ============================================================================
 # Regime Decision
 # ============================================================================
 
@@ -178,8 +281,14 @@ class RegimeDecision(BaseModel):
     symbol: str
     timestamp: datetime
 
+    schema_version: str = Field(
+        default="1.1", description="Version tag for downstream schema consumers"
+    )
     label: RegimeLabel
     confidence: float = Field(ge=0.0, le=1.0, description="Confidence in classification")
+    state: Optional[str] = Field(
+        default=None, description="String alias for regime label (execution contracts)"
+    )
 
     # Supporting evidence
     hurst_avg: float = Field(ge=0.0, le=1.0)
@@ -189,6 +298,40 @@ class RegimeDecision(BaseModel):
     # CCM influence
     sector_coupling: Optional[float] = None
     macro_coupling: Optional[float] = None
+
+    # Execution placeholders
+    posterior_p: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0, description="Posterior probability placeholder"
+    )
+    expected_remaining_time: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Expected remaining time in minutes before regime flip",
+    )
+    gates: Optional[RegimeGates] = Field(
+        default=None, description="Active gating thresholds applied to decisions"
+    )
+    promotion_reason: Optional[str] = Field(
+        default=None, description="Why the final label differs from the raw label"
+    )
+    gate_reasons: Optional[List[str]] = Field(
+        default=None, description="Raw gating reasons captured during hysteresis"
+    )
+    volatility: Optional[VolatilitySnapshot] = Field(
+        default=None, description="Volatility snapshot driving dynamic gates"
+    )
+    ensemble: Optional[EnsembleSnapshot] = Field(
+        default=None, description="Ensemble placeholders for agreement tracking"
+    )
+    conflicts: Optional[ConflictFlags] = Field(
+        default=None, description="Conflict flags that block execution"
+    )
+    meta: Optional[RegimeMeta] = Field(
+        default=None, description="Additional metadata (tier/timestamp/session)"
+    )
+    vote_margin: Optional[float] = Field(
+        default=None, ge=0.0, description="Margin between top and runner-up vote weights"
+    )
 
     rationale: str = Field(description="Explanation for regime classification")
     base_label: Optional[RegimeLabel] = Field(
@@ -214,13 +357,46 @@ class RegimeDecision(BaseModel):
                 "tier": "ST",
                 "symbol": "BTC-USD",
                 "timestamp": "2024-01-15T12:00:00Z",
+                "schema_version": "1.1",
                 "label": "trending",
                 "confidence": 0.78,
+                "state": "trending",
+                "vote_margin": 0.18,
                 "hurst_avg": 0.60,
                 "vr_statistic": 1.15,
                 "adf_p_value": 0.24,
                 "sector_coupling": 0.72,
                 "macro_coupling": 0.18,
+                "posterior_p": 0.74,
+                "expected_remaining_time": 120,
+                "gates": {
+                    "p_min": 0.62,
+                    "enter": 0.65,
+                    "exit": 0.55,
+                    "m_bars": 3,
+                    "min_remaining": 15,
+                    "reasons": ["score 0.61 >= p_min 0.62"],
+                },
+                "volatility": {"sigma": 0.012, "sigma_ref": 0.009, "scale": 1.33},
+                "ensemble": {
+                    "models": ["sticky_hmm", "hsmm", "tvtp"],
+                    "agreement_score": 0.68,
+                },
+                "conflicts": {
+                    "higher_tf_disagree": False,
+                    "event_blackout": False,
+                    "volatility_gate_block": False,
+                    "execution_blackout": False,
+                },
+                "promotion_reason": "hysteresis_holdover",
+                "meta": {
+                    "tier": "ST",
+                    "asof_utc": "2024-01-15T12:00:00Z",
+                    "session": {
+                        "start_utc": "2024-01-15T00:00:00Z",
+                        "end_utc": "2024-01-15T23:59:59Z",
+                    },
+                },
                 "rationale": "H>0.55, VR>1.05, high sector coupling → trending regime",
             }
         }
@@ -538,9 +714,14 @@ class ExecReport(BaseModel):
     st_regime: Optional[RegimeLabel] = Field(default=None, description="ST regime (monitoring only)")
     st_strategy: Optional[str] = Field(default=None, description="ST strategy (reference)")
     st_confidence: Optional[float] = Field(default=None, description="ST confidence")
+    us_regime: Optional[RegimeLabel] = Field(default=None, description="US (5m) regime filter")
+    us_confidence: Optional[float] = Field(default=None, description="US confidence")
 
     # Summary text
     summary_md: str = Field(description="Full markdown report content")
+    stochastic_outlook: Optional[StochasticForecastResult] = Field(
+        default=None, description="Monte Carlo forecast metrics by tier"
+    )
 
     # Artifact paths
     artifacts_dir: str

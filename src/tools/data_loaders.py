@@ -6,7 +6,7 @@ All data stored as Parquet with UTC timestamps
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 from polygon import RESTClient
@@ -14,6 +14,7 @@ from polygon.rest.models import Agg
 
 from src.core.utils import get_polygon_api_key
 from src.tools.microstructure import fetch_crypto_quotes
+from src.adapters.equity_loader import EquityDataLoader
 
 logger = logging.getLogger(__name__)
 
@@ -315,6 +316,43 @@ def get_polygon_bars(
     return loader.get_bars(symbol, bar, start, end, lookback_days)
 
 
+_EQUITY_LOADER: Optional[EquityDataLoader] = None
+
+
+def get_alpaca_bars(
+    symbol: str,
+    bar: str,
+    start: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+    lookback_days: int = 30,
+    include_premarket: bool = False,
+    include_postmarket: bool = False,
+    tz: str = "America/New_York",
+    adjustment: str = "all",
+    feed: Optional[str] = None,
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """
+    Convenience function to get Alpaca equity bars with metadata.
+    """
+    global _EQUITY_LOADER
+    if _EQUITY_LOADER is None:
+        _EQUITY_LOADER = EquityDataLoader()
+
+    df, meta = _EQUITY_LOADER.get_bars(
+        symbol=symbol,
+        bar=bar,
+        start=start,
+        end=end,
+        lookback_days=lookback_days,
+        include_premarket=include_premarket,
+        include_postmarket=include_postmarket,
+        tz=tz,
+        adjustment=adjustment,
+        feed=feed,
+    )
+    return df, meta
+
+
 def fetch_quotes_data(
     symbol: str,
     start_date: str,
@@ -348,4 +386,3 @@ def fetch_quotes_data(
 
     # Fetch quotes data
     return fetch_crypto_quotes(symbol, start_date, end_date, api_key)
-

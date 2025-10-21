@@ -23,7 +23,7 @@ class SignalRow(BaseModel):
     symbol: str = Field(
         description="QuantConnect symbol format (e.g., 'BTCUSD', 'EURUSD')"
     )
-    asset_class: Literal["FX", "CRYPTO"] = Field(
+    asset_class: Literal["FX", "CRYPTO", "EQUITY"] = Field(
         description="Asset class for position sizing logic"
     )
     venue: Optional[str] = Field(
@@ -223,4 +223,3 @@ class SignalsTable(BaseModel):
     def to_csv_rows(self) -> List[dict]:
         """Convert all signals to CSV-serializable dicts"""
         return [s.to_csv_row() for s in self.signals]
-

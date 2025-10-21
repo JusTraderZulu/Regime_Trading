@@ -123,12 +123,22 @@ def contradictor_node(state: PipelineState) -> Dict:
     borderline_threshold = contradictor_config.get("borderline_threshold", 0.10)
     alpha = config.get("tests", {}).get("adf_alpha", 0.05)
 
-    if abs(features_st.vr_p_value - alpha) < borderline_threshold:
+    borderline_floor = contradictor_config.get("borderline_floor", 0.01)
+
+    if (
+        features_st.vr_p_value is not None
+        and features_st.vr_p_value > borderline_floor
+        and abs(features_st.vr_p_value - alpha) < borderline_threshold
+    ):
         contradictions.append(
             f"VR p-value borderline: p={features_st.vr_p_value:.3f} (close to alpha={alpha})"
         )
 
-    if abs(alt_features.vr_p_value - alpha) < borderline_threshold:
+    if (
+        alt_features.vr_p_value is not None
+        and alt_features.vr_p_value > borderline_floor
+        and abs(alt_features.vr_p_value - alpha) < borderline_threshold
+    ):
         contradictions.append(
             f"VR p-value borderline with alternate bar: p={alt_features.vr_p_value:.3f}"
         )
@@ -157,4 +167,3 @@ def contradictor_node(state: PipelineState) -> Dict:
     )
 
     return {"contradictor_st": report}
-

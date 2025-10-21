@@ -64,14 +64,19 @@ def _validate_price_data(close_series: pd.Series, symbol: str, tier: Tier) -> Di
             return {'valid': False, 'reason': f'Excessive volatility: {extreme_moves} extreme moves (>1000%)'}
 
     # 8. Check for time consistency (basic)
-    if hasattr(close_series.index, 'freq'):
-        if close_series.index.freq is None:
-            # Check if timestamps are roughly evenly spaced
-            time_diffs = close_series.index.to_series().diff().dt.total_seconds()
-            if len(time_diffs) > 1:
-                std_diff = time_diffs.std()
-                mean_diff = time_diffs.mean()
-                if std_diff > mean_diff * 0.5:  # High variation in time intervals
+    if isinstance(close_series.index, pd.DatetimeIndex):
+        time_diffs = close_series.index.to_series().diff().dropna().dt.total_seconds()
+        if len(time_diffs) > 1:
+            median_diff = float(np.median(time_diffs))
+            if median_diff > 0:
+                multiples = np.round(time_diffs / median_diff)
+                normalized = np.where(
+                    multiples > 0,
+                    np.abs(time_diffs / median_diff - multiples),
+                    1.0,
+                )
+                irregular_ratio = float((normalized > 0.05).mean())
+                if irregular_ratio > 0.1:
                     return {'valid': False, 'reason': 'Irregular time intervals detected'}
 
     # Data passes all validation checks
