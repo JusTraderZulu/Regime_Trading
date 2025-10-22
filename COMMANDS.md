@@ -8,11 +8,29 @@ Quick reference for all available commands in the Regime Detector system.
 
 ### **Scan Universe**
 ```bash
-# Scan all configured symbols (78 assets)
+# Scan all configured symbols
 python -m src.scanner.main
 
 # Output: artifacts/scanner/latest/scanner_report.md
 # Time: ~60 seconds
+```
+
+### **Scan by Asset Class** 🆕
+```bash
+# Crypto only (weekends, after-hours)
+python -m src.scanner.main --crypto-only
+
+# Equities only (market hours)
+python -m src.scanner.main --equities-only
+
+# Forex only
+python -m src.scanner.main --forex-only
+
+# Crypto + Forex (after 4pm ET)
+python -m src.scanner.main --no-equities
+
+# Custom combination
+python -m src.scanner.main --enable crypto,forex
 ```
 
 ### **Complete Scan + Analyze**

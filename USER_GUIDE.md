@@ -192,16 +192,34 @@ python -m src.ui.cli run --symbol X:ETHUSD --mode thorough
 
 #### **Scan Entire Universe**
 ```bash
-# Scan all configured symbols (78 assets)
+# Scan all configured symbols
 python -m src.scanner.main
 
 # Output: artifacts/scanner/latest/scanner_report.md
 ```
 
+#### **Scan by Market Hours** 🆕
+```bash
+# Weekends / After-hours (crypto only, 24/7)
+python -m src.scanner.main --crypto-only
+
+# Market hours (equities + crypto + forex)
+python -m src.scanner.main
+
+# After 4pm ET (crypto + forex, no equities)
+python -m src.scanner.main --no-equities
+
+# Equities only (market hours only)
+python -m src.scanner.main --equities-only
+
+# Custom combination
+python -m src.scanner.main --enable crypto,forex
+```
+
 **What it scans:**
-- 40 crypto symbols (from `universes/crypto_top100.txt`)
-- 28 equities (from `universes/equities_sp500.txt`)
-- 10 forex pairs (from `universes/forex_majors.txt`)
+- 40+ crypto symbols (from `universes/crypto_top100.txt`)
+- 28+ equities (from `universes/equities_sp500.txt`)
+- 10+ forex pairs (from `universes/forex_majors.txt`)
 
 **Filters to:** Top 10 per asset class (30 total candidates max)
 

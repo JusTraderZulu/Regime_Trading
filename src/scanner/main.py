@@ -9,7 +9,7 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 import yaml
 
@@ -109,9 +109,13 @@ def generate_scanner_report(
     logger.info(f"Scanner report written to {report_path}")
 
 
-def run_scanner(config_path: str = "config/scanner.yaml") -> Dict:
+def run_scanner(config_path: str = "config/scanner.yaml", config_overrides: Optional[Dict] = None) -> Dict:
     """
     Run the multi-asset scanner.
+    
+    Args:
+        config_path: Path to config file
+        config_overrides: Optional dict to override config (e.g., {'enabled': {'crypto': True, 'equities': False}})
     
     Returns:
         Dict with scan results
@@ -122,6 +126,14 @@ def run_scanner(config_path: str = "config/scanner.yaml") -> Dict:
     
     # Load config
     config = load_scanner_config(config_path)
+    
+    # Apply overrides
+    if config_overrides:
+        for key, value in config_overrides.items():
+            if isinstance(value, dict) and key in config and isinstance(config[key], dict):
+                config[key].update(value)
+            else:
+                config[key] = value
     
     # Build universe
     symbols = get_all_symbols(config)
@@ -220,14 +232,88 @@ def main():
         help='Logging level'
     )
     
+    # Universe control flags
+    parser.add_argument(
+        '--crypto-only',
+        action='store_true',
+        help='Scan crypto only (disable equities/forex)'
+    )
+    parser.add_argument(
+        '--equities-only',
+        action='store_true',
+        help='Scan equities only (disable crypto/forex)'
+    )
+    parser.add_argument(
+        '--forex-only',
+        action='store_true',
+        help='Scan forex only (disable crypto/equities)'
+    )
+    parser.add_argument(
+        '--no-equities',
+        action='store_true',
+        help='Skip equities (crypto + forex only)'
+    )
+    parser.add_argument(
+        '--no-crypto',
+        action='store_true',
+        help='Skip crypto (equities + forex only)'
+    )
+    parser.add_argument(
+        '--no-forex',
+        action='store_true',
+        help='Skip forex (crypto + equities only)'
+    )
+    parser.add_argument(
+        '--enable',
+        type=str,
+        help='Comma-separated list of asset classes to enable (e.g., "crypto,forex")'
+    )
+    
     args = parser.parse_args()
     
     # Setup logging
     setup_logging(level=args.log_level)
     
+    # Override config based on CLI flags
+    config_overrides = None
+    if any([args.crypto_only, args.equities_only, args.forex_only, 
+            args.no_equities, args.no_crypto, args.no_forex, args.enable]):
+        
+        # Start with all disabled
+        config_overrides = {
+            'enabled': {
+                'crypto': False,
+                'equities': False,
+                'forex': False
+            }
+        }
+        
+        # Apply flags
+        if args.crypto_only:
+            config_overrides['enabled']['crypto'] = True
+        elif args.equities_only:
+            config_overrides['enabled']['equities'] = True
+        elif args.forex_only:
+            config_overrides['enabled']['forex'] = True
+        elif args.enable:
+            # Parse comma-separated list
+            for asset_class in args.enable.split(','):
+                asset_class = asset_class.strip().lower()
+                if asset_class in ['crypto', 'equities', 'forex']:
+                    config_overrides['enabled'][asset_class] = True
+        else:
+            # Apply --no-* flags (start with all true)
+            config_overrides['enabled'] = {
+                'crypto': not args.no_crypto,
+                'equities': not args.no_equities,
+                'forex': not args.no_forex
+            }
+        
+        logger.info(f"CLI overrides: {config_overrides['enabled']}")
+    
     # Run scanner
     try:
-        results = run_scanner(args.config)
+        results = run_scanner(args.config, config_overrides=config_overrides)
         sys.exit(0 if results else 1)
     except Exception as e:
         logger.error(f"Scanner failed: {e}", exc_info=True)
