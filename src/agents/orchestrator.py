@@ -738,6 +738,11 @@ def detect_regime_node(state: PipelineState) -> Dict:
                     )
             results[f"regime_{tier_key}"] = regime
 
+            # Log regime outcome
+            logger.info(
+                f"Regime {tier_str}: {regime.label.value} (confidence={regime.confidence:.2f})"
+            )
+
             # Stage 1: read-only transition telemetry (no behavior change)
             if tm_enabled:
                 try:
@@ -759,12 +764,24 @@ def detect_regime_node(state: PipelineState) -> Dict:
                                     save_json(snap.model_dump(), metrics_dir / f"snap_{tier_str}_{int(w)}.json")
                 except Exception as tm_exc:
                     logger.debug(f"Transition metrics skipped for {tier_str}: {tm_exc}")
-            logger.info(
-                f"Regime {tier_str}: {regime.label.value} (confidence={regime.confidence:.2f})"
-            )
         except Exception as e:
             logger.error(f"Failed to detect regime for {tier_str}: {e}")
             results[f"regime_{tier_key}"] = None
+
+    # Final snapshot at end of detection loop to ensure artifacts for report
+    if tm_enabled and tm_cfg.get("persist", True):
+        try:
+            artifacts_dir = state.get("artifacts_dir")
+            if artifacts_dir:
+                metrics_dir = Path(artifacts_dir) / metrics_dir_name
+                for tier_str in active_tiers:
+                    for w in tm_windows:
+                        trk = trackers.get((int(w), tier_str)) if trackers else None
+                        if trk:
+                            snap = trk.snapshot(tier_str)
+                            save_json(snap.model_dump(), metrics_dir / f"snap_{tier_str}_{int(w)}.json")
+        except Exception as tm_exc:
+            logger.debug(f"Final transition snapshot skipped: {tm_exc}")
 
     _enforce_multi_timeframe_alignment(results, config)
 

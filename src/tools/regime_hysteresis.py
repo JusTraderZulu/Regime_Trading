@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, Tuple
 
 from src.core.schemas import ConflictFlags, RegimeDecision, RegimeLabel
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -263,6 +264,32 @@ def apply_hysteresis(
 
     symbol_state[tier_key] = entry
     return adjusted, memory
+
+
+def apply_adaptive_if_enabled(
+    tier: str,
+    base_gates: Any,
+    suggestion: Any,
+    config: Dict[str, Any],
+) -> Any:
+    """
+    Optionally apply adaptive gates when feature flag is enabled.
+    Safe: returns base_gates unchanged unless enabled.
+    """
+    try:
+        features_cfg = config.get("features", {}) if isinstance(config, dict) else {}
+        adaptive_cfg = features_cfg.get("adaptive_hysteresis", {}) if isinstance(features_cfg, dict) else {}
+        if not adaptive_cfg.get("enabled", False):
+            return base_gates
+        # Build updated gates respecting the same type
+        return base_gates.__class__(
+            enter=getattr(suggestion, "suggest_enter", getattr(base_gates, "enter", None)),
+            exit=getattr(suggestion, "suggest_exit", getattr(base_gates, "exit", None)),
+            m_bars=getattr(suggestion, "suggest_m_bars", getattr(base_gates, "m_bars", None)),
+            min_remaining=getattr(base_gates, "min_remaining", None),
+        )
+    except Exception:
+        return base_gates
 
 
 def _annotate_decision(

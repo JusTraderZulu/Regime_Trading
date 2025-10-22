@@ -1017,6 +1017,32 @@ def summarizer_node(state: PipelineState) -> dict:
 
     summary_md = "\n".join(summary_lines)
 
+    # Append Regime Transition Metrics if present
+    try:
+        artifacts_path = Path(artifacts_dir)
+        metrics_dir = artifacts_path / "metrics"
+        if metrics_dir.exists():
+            rows = ["## Regime Transition Metrics", "Tier | Window | Flip Density | Median Dur | Entropy | Alerts", "---- | ------ | ------------ | ---------- | ------- | ------"]
+            # Heuristic: show the smallest window per tier if multiple
+            for tier_name in ["LT","MT","ST","US"]:
+                # pick any snap_{tier}_*.json, prefer smaller window
+                snaps = sorted(metrics_dir.glob(f"snap_{tier_name}_*.json"), key=lambda p: int(p.stem.split("_")[-1]))
+                if snaps:
+                    try:
+                        snap = json.loads(snaps[0].read_text())
+                        flip_density = snap.get("flip_density", 0.0)
+                        median_dur = snap.get("duration", {}).get("median", 0.0)
+                        entropy = snap.get("matrix", {}).get("entropy", 0.0)
+                        window = snap.get("window_bars", 0)
+                        alerts = ",".join(snap.get("alerts", [])) or "-"
+                        rows.append(f"{tier_name} | {window} | {flip_density:.3f} | {median_dur:.0f} | {entropy:.2f} | {alerts}")
+                    except Exception:
+                        continue
+            if len(rows) > 3:
+                summary_md += "\n\n" + "\n".join(rows) + "\n"
+    except Exception as exc:
+        logger.debug(f"Transition metrics section skipped: {exc}")
+
     try:
         artifacts_path = Path(artifacts_dir)
         artifacts_path.mkdir(parents=True, exist_ok=True)
