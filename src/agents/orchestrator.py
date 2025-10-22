@@ -759,7 +759,12 @@ def detect_regime_node(state: PipelineState) -> Dict:
                                     tier=tier_str,
                                 )
                                 updated_gates = apply_adaptive_if_enabled(tier_str, regime.gates, s, config)
-                                regime = regime.model_copy(update={"gates": updated_gates})
+                                # Update gates and clarify rationale to reflect applied values
+                                new_rationale = (
+                                    (regime.rationale or "")
+                                    + f" | Gates (applied): m_bars={getattr(updated_gates, 'm_bars', None)}"
+                                )
+                                regime = regime.model_copy(update={"gates": updated_gates, "rationale": new_rationale})
                 except Exception as adapt_exc:
                     logger.debug(f"Adaptive apply skipped for {tier_str}: {adapt_exc}")
 

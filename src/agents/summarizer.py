@@ -1022,7 +1022,11 @@ def summarizer_node(state: PipelineState) -> dict:
         artifacts_path = Path(artifacts_dir)
         metrics_dir = artifacts_path / "metrics"
         if metrics_dir.exists():
-            rows = ["## Regime Transition Metrics", "Tier | Window | Flip Density | Median Dur | Entropy | Alerts", "---- | ------ | ------------ | ---------- | ------- | ------"]
+            rows = [
+                "## Regime Transition Metrics",
+                "Tier | Window | Flip Density | Median Dur | Entropy | Sigma Post/Pre | Alerts",
+                "---- | ------ | ------------ | ---------- | ------- | -------------- | ------",
+            ]
             # Heuristic: show the smallest window per tier if multiple
             for tier_name in ["LT","MT","ST","US"]:
                 # pick any snap_{tier}_*.json, prefer smaller window
@@ -1030,12 +1034,19 @@ def summarizer_node(state: PipelineState) -> dict:
                 if snaps:
                     try:
                         snap = json.loads(snaps[0].read_text())
+                        # Treat zeros as collecting… indicators
                         flip_density = snap.get("flip_density", 0.0)
                         median_dur = snap.get("duration", {}).get("median", 0.0)
                         entropy = snap.get("matrix", {}).get("entropy", 0.0)
+                        sigma_ratio = snap.get("sigma_around_flip_ratio", 1.0)
                         window = snap.get("window_bars", 0)
                         alerts = ",".join(snap.get("alerts", [])) or "-"
-                        rows.append(f"{tier_name} | {window} | {flip_density:.3f} | {median_dur:.0f} | {entropy:.2f} | {alerts}")
+                        if median_dur == 0 and flip_density == 0:
+                            rows.append(f"{tier_name} | {window} | collecting… | collecting… | collecting… | collecting… | -")
+                        else:
+                            rows.append(
+                                f"{tier_name} | {window} | {flip_density:.3f} | {median_dur:.0f} | {entropy:.2f} | {sigma_ratio:.2f} | {alerts}"
+                            )
                     except Exception:
                         continue
             if len(rows) > 3:
