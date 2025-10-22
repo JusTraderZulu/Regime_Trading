@@ -171,41 +171,50 @@ def hurst_dfa(series: pd.Series, min_window: int = 16, max_window: int = 512, st
 def variance_ratio(series: pd.Series, q: int) -> Dict:
     """
     Lo-MacKinlay variance ratio test for single lag.
-    
+
     Args:
         series: Price series
         q: Lag (e.g., 2, 4, 8)
-    
+
     Returns:
         {"vr": float, "p": float, "q": int}
     """
     returns = series.pct_change().dropna().values
-    
-    if len(returns) < q * 3:
+    returns = returns[~np.isnan(returns)]
+
+    if len(returns) < q * 3 or q <= 1:
         return {"vr": 1.0, "p": 1.0, "q": q}
-    
+
     n = len(returns)
-    
+
     # Variance of 1-period returns
     var_1 = np.var(returns, ddof=1)
-    
+
+    # Handle edge case where variance is zero
+    if var_1 <= 0:
+        return {"vr": 1.0, "p": 1.0, "q": q}
+
     # Variance of q-period returns
     returns_q = np.array([returns[i:i+q].sum() for i in range(n - q + 1)])
     var_q = np.var(returns_q, ddof=1)
-    
+
     # Variance ratio
     vr = (var_q / q) / var_1 if var_1 > 0 else 1.0
-    
+
+    # Handle invalid variance ratio
+    if np.isnan(vr) or np.isinf(vr):
+        return {"vr": 1.0, "p": 1.0, "q": q}
+
     # Test statistic (under iid assumption)
     # θ(q) ~ N(0, variance under null)
     phi_hat = (2 * (2 * q - 1) * (q - 1)) / (3 * q * n)
-    
-    if phi_hat > 0:
+
+    if phi_hat > 0 and not np.isnan(phi_hat) and not np.isinf(phi_hat):
         z_stat = (vr - 1) / np.sqrt(phi_hat)
         p_value = 2 * (1 - stats.norm.cdf(abs(z_stat)))
     else:
         p_value = 1.0
-    
+
     return {
         "vr": float(vr),
         "p": float(p_value),
@@ -401,59 +410,80 @@ def skew_kurt_stability_index(df_roll: pd.DataFrame) -> float:
 def arch_lm_test(series: pd.Series, lags: int = 5) -> Dict:
     """
     ARCH-LM test for volatility clustering (ARCH effects).
-    
+
     Tests if squared returns exhibit autocorrelation.
-    
+
     Args:
         series: Price series
         lags: Number of lags to test
-    
+
     Returns:
         {"LM_stat": float, "p": float, "lags": int}
     """
     returns = series.pct_change().dropna().values
-    
-    if len(returns) < lags * 3:
+    returns = returns[~np.isnan(returns)]
+
+    if len(returns) < lags * 3 or lags <= 0:
         return {"LM_stat": 0.0, "p": 1.0, "lags": lags}
-    
+
     # Squared returns (proxy for volatility)
     returns_sq = returns ** 2
-    
+
     # Demean
     returns_sq = returns_sq - returns_sq.mean()
-    
+
     # Build lagged matrix
     X = []
     for i in range(lags):
-        X.append(returns_sq[lags - i - 1: len(returns_sq) - i - 1])
-    
+        lagged_series = returns_sq[lags - i - 1: len(returns_sq) - i - 1]
+        if len(lagged_series) != len(returns_sq) - lags:
+            return {"LM_stat": 0.0, "p": 1.0, "lags": lags}
+        X.append(lagged_series)
+
     X = np.column_stack(X)
     y = returns_sq[lags:]
-    
+
+    # Check for sufficient data after lagging
+    if len(y) < lags + 1:
+        return {"LM_stat": 0.0, "p": 1.0, "lags": lags}
+
     # OLS regression: ε²(t) ~ ε²(t-1) + ... + ε²(t-p)
     try:
         from scipy.linalg import lstsq
         beta, _, _, _ = lstsq(X, y)
-        
+
         # Residuals
         y_pred = X @ beta
         resid = y - y_pred
-        
+
         # LM statistic = n * R²
         SSR = np.sum(resid ** 2)
         SST = np.sum((y - y.mean()) ** 2)
-        R2 = 1 - SSR / SST if SST > 0 else 0
-        
+
+        if SST <= 0:
+            return {"LM_stat": 0.0, "p": 1.0, "lags": lags}
+
+        R2 = 1 - SSR / SST
+
+        # Ensure R2 is in valid range
+        R2 = max(0.0, min(1.0, R2))
+
         LM_stat = len(y) * R2
-        
+
+        # Handle invalid LM statistic
+        if np.isnan(LM_stat) or np.isinf(LM_stat) or LM_stat < 0:
+            return {"LM_stat": 0.0, "p": 1.0, "lags": lags}
+
         # Under H0, LM ~ χ²(lags)
         p_value = 1 - stats.chi2.cdf(LM_stat, lags)
-        
+
         return {
             "LM_stat": float(LM_stat),
             "p": float(p_value),
             "lags": int(lags)
         }
-    except:
+    except Exception as e:
+        # Log the error for debugging but don't fail the test
+        logger.debug(f"ARCH-LM test failed: {e}")
         return {"LM_stat": 0.0, "p": 1.0, "lags": lags}
 

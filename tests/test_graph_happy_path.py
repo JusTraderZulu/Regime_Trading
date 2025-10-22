@@ -122,6 +122,10 @@ class TestSchemaValidation:
             returns_vol=0.025,
             returns_skew=-0.15,
             returns_kurt=3.5,
+            # Required data quality fields
+            data_quality_score=0.95,
+            data_completeness=0.98,
+            outlier_percentage=0.02,
         )
 
         assert features.hurst_rs == 0.55

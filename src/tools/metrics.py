@@ -286,11 +286,33 @@ def analyze_trades(returns: np.ndarray, signals: pd.Series) -> Dict:
 
 def _analyze_directional_trades(returns: np.ndarray, signals: pd.Series, direction: int) -> Dict:
     """Analyze trades for specific direction (long=1 or short=-1)"""
-    # This is a simplified version - in reality would need to track actual trades
-    # For now, return dummy stats
+    returns = returns[~np.isnan(returns)]
+
+    if len(returns) == 0:
+        return {"n_trades": 0, "win_rate": None}
+
+    # Find periods where position matches direction
+    position_mask = (signals == direction).values
+
+    if not np.any(position_mask):
+        return {"n_trades": 0, "win_rate": None}
+
+    # Get returns during directional periods
+    directional_returns = returns[position_mask]
+
+    if len(directional_returns) == 0:
+        return {"n_trades": 0, "win_rate": None}
+
+    # Count trades (position changes into/out of direction)
+    # This is a simplified approach - actual trade counting would require more sophisticated logic
+    n_directional_periods = np.sum(position_mask)
+    wins = np.sum(directional_returns > 0)
+
+    win_rate = wins / n_directional_periods if n_directional_periods > 0 else None
+
     return {
-        "n_trades": 0,
-        "win_rate": None,
+        "n_trades": int(n_directional_periods),
+        "win_rate": float(win_rate) if win_rate is not None else None,
     }
 
 
@@ -401,28 +423,44 @@ def compute_avg_trade_duration(signals: pd.Series) -> float:
 
 
 def compute_sharpe_confidence_interval(
-    returns: np.ndarray, 
+    returns: np.ndarray,
     confidence: float = 0.95,
     periods_per_year: int = 252
 ) -> Tuple[float, float]:
     """
     Compute confidence interval for Sharpe ratio using bootstrap.
-    
+
     Returns:
         (lower_bound, upper_bound)
     """
+    returns = returns[~np.isnan(returns)]
+
     if len(returns) < 10:
         return (0.0, 0.0)
-    
+
+    # Handle edge cases where std is zero or very small
+    std_returns = returns.std()
+    if std_returns == 0 or np.isclose(std_returns, 0, atol=1e-12):
+        return (0.0, 0.0)
+
     # Simple parametric CI (normal approximation)
-    sharpe = returns.mean() / returns.std() * np.sqrt(periods_per_year)
+    sharpe = returns.mean() / std_returns * np.sqrt(periods_per_year)
+
+    # Prevent division by zero or invalid calculations
+    if np.isnan(sharpe) or np.isinf(sharpe):
+        return (0.0, 0.0)
+
     se_sharpe = np.sqrt((1 + 0.5 * sharpe**2) / len(returns))
-    
+
+    # Handle invalid standard error
+    if np.isnan(se_sharpe) or np.isinf(se_sharpe) or se_sharpe <= 0:
+        return (0.0, 0.0)
+
     z_score = stats.norm.ppf((1 + confidence) / 2)
-    
+
     lower = sharpe - z_score * se_sharpe
     upper = sharpe + z_score * se_sharpe
-    
+
     return (float(lower), float(upper))
 
 

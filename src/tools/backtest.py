@@ -527,8 +527,19 @@ def backtest(
     
     # Information Ratio (alpha / tracking error)
     # Tracking error = std dev of (strategy returns - baseline returns)
-    tracking_error = (returns_arr - buy_hold_returns).std() if len(returns_arr) == len(buy_hold_returns) else 1.0
-    information_ratio = alpha / tracking_error if tracking_error > 0 else 0.0
+    if len(returns_arr) == len(buy_hold_returns):
+        tracking_error = (returns_arr - buy_hold_returns).std()
+        # Handle edge case where tracking error is zero or very small
+        if tracking_error <= 0 or np.isclose(tracking_error, 0, atol=1e-12):
+            information_ratio = 0.0
+        else:
+            information_ratio = alpha / tracking_error
+    else:
+        information_ratio = 0.0
+
+    # Handle invalid information ratio
+    if np.isnan(information_ratio) or np.isinf(information_ratio):
+        information_ratio = 0.0
 
     # Save artifacts
     equity_curve_path = None
@@ -622,17 +633,54 @@ def backtest(
 
 def compute_sharpe(returns: np.ndarray, periods_per_year: int = 252) -> float:
     """Compute annualized Sharpe ratio"""
-    if len(returns) < 2 or returns.std() == 0:
+    returns = returns[~np.isnan(returns)]
+
+    if len(returns) < 2:
         return 0.0
-    return float(returns.mean() / returns.std() * np.sqrt(periods_per_year))
+
+    std_returns = returns.std()
+    if std_returns == 0 or np.isclose(std_returns, 0, atol=1e-12):
+        return 0.0
+
+    mean_return = returns.mean()
+    if np.isnan(mean_return) or np.isinf(mean_return):
+        return 0.0
+
+    sharpe = mean_return / std_returns * np.sqrt(periods_per_year)
+
+    # Handle invalid calculations
+    if np.isnan(sharpe) or np.isinf(sharpe):
+        return 0.0
+
+    return float(sharpe)
 
 
 def compute_sortino(returns: np.ndarray, periods_per_year: int = 252) -> float:
     """Compute annualized Sortino ratio"""
-    downside = returns[returns < 0]
-    if len(downside) < 2 or downside.std() == 0:
+    returns = returns[~np.isnan(returns)]
+
+    if len(returns) < 2:
         return 0.0
-    return float(returns.mean() / downside.std() * np.sqrt(periods_per_year))
+
+    downside = returns[returns < 0]
+    if len(downside) < 2:
+        return 0.0
+
+    std_downside = downside.std()
+    if std_downside == 0 or np.isclose(std_downside, 0, atol=1e-12):
+        return 0.0
+
+    mean_return = returns.mean()
+    if np.isnan(mean_return) or np.isinf(mean_return):
+        return 0.0
+
+    sortino = mean_return / std_downside * np.sqrt(periods_per_year)
+
+    # Handle invalid calculations
+    if np.isnan(sortino) or np.isinf(sortino):
+        return 0.0
+
+    return float(sortino)
 
 
 def compute_cagr(equity_curve: pd.Series) -> float:
