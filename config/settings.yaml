@@ -431,7 +431,7 @@ features:
 
   adaptive_hysteresis:
     enabled: true
-    shadow_mode: true
+    shadow_mode: false
     clamps:
       m_bars_min: 2
       m_bars_max: 8
