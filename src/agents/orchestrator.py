@@ -30,6 +30,7 @@ from src.core.utils import create_artifacts_dir
 from src.core.transition.tracker import TransitionTracker
 from src.core.transition.stats import suggest_hysteresis
 from src.core.transition.schema import AdaptiveSuggestion
+from src.tools.regime_hysteresis import apply_adaptive_if_enabled
 from src.core.utils import save_json
 from src.core.progress import track_node
 from src.bridges.symbol_map import parse_symbol_info
@@ -736,6 +737,32 @@ def detect_regime_node(state: PipelineState) -> Dict:
                             "rationale": regime.rationale + f" | Event blackout: {event_names}",
                         }
                     )
+            # Apply adaptive gates if enabled (Stage 3), else keep base
+            if tm_enabled:
+                try:
+                    features_cfg = config.get("features", {}) if isinstance(config, dict) else {}
+                    adaptive_cfg = features_cfg.get("adaptive_hysteresis", {}) if isinstance(features_cfg, dict) else {}
+                    if adaptive_cfg.get("enabled", False) and adaptive_cfg.get("shadow_mode", True) is False:
+                        # Use smallest window suggestion when available
+                        if tm_windows:
+                            w0 = int(sorted(tm_windows)[0])
+                            trk0 = trackers.get((w0, tier_str)) if trackers else None
+                            if trk0 and regime.gates:
+                                snap0 = trk0.snapshot(tier_str)
+                                s = suggest_hysteresis(
+                                    stats=snap0,
+                                    base_m_bars=int(getattr(regime.gates, "m_bars", 0) or 0),
+                                    base_enter=float(getattr(regime.gates, "enter", 0.0) or 0.0),
+                                    base_exit=float(getattr(regime.gates, "exit", 0.0) or 0.0),
+                                    clamps=adaptive_cfg.get("clamps", {}),
+                                    formulas=adaptive_cfg.get("formulas", {}),
+                                    tier=tier_str,
+                                )
+                                updated_gates = apply_adaptive_if_enabled(tier_str, regime.gates, s, config)
+                                regime = regime.model_copy(update={"gates": updated_gates})
+                except Exception as adapt_exc:
+                    logger.debug(f"Adaptive apply skipped for {tier_str}: {adapt_exc}")
+
             results[f"regime_{tier_key}"] = regime
 
             # Log regime outcome

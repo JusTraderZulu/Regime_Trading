@@ -430,7 +430,7 @@ features:
       dir: "metrics"  # stored under each run's artifacts dir
 
   adaptive_hysteresis:
-    enabled: false
+    enabled: true
     shadow_mode: true
     clamps:
       m_bars_min: 2
