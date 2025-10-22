@@ -1,4 +1,4 @@
 time,symbol,asset_class,venue,regime,side,weight,confidence,mid,spread,pip_value,fee_bps,funding_apr,strategy_name,strategy_params,microstructure_data_quality,microstructure_market_efficiency,microstructure_liquidity,microstructure_bid_ask_spread_bps,microstructure_ofi_imbalance,microstructure_microprice,transition_flip_density,transition_median_duration,transition_entropy,llm_context_verdict,llm_analytical_verdict,llm_confidence_adjustment,forecast_prob_up,forecast_expected_return,forecast_var95,action_conviction,action_stability,action_bias,action_tactical_mode,action_sizing_pct
-2025-10-22T00:00:00Z,BTCUSD,CRYPTO,GDAX,trending,1,0.3500,0.3500,108285.99,,,,,,,,,,,,,,,,,,,,,,,,,,
-2025-10-22T12:00:00Z,BTCUSD,CRYPTO,GDAX,trending,1,0.3500,0.3500,108020.00,,,,,,,,,,,,,,,,,,,,,,,,,,
-2025-10-22T13:00:00Z,BTCUSD,CRYPTO,GDAX,mean_reverting,0,0.0000,0.3500,108020.00,,,,,,,0.800,unknown,unknown,,,,,,,,,,,,,,,,,
+2025-10-21T00:00:00Z,SPY,EQUITY,USA,random,0,0.0000,0.4750,671.26,,,,,,,,,,,,,,,,,,,,,,,,,,
+2025-10-21T20:00:00Z,SPY,EQUITY,USA,random,0,0.0000,0.5750,670.71,,,,,,,,,,,,,,,,,,,,,,,,,,
+2025-10-21T20:00:00Z,SPY,EQUITY,USA,random,0,0.0000,0.3500,670.71,,,,,,,0.800,unknown,unknown,,,,,,,,,,,,,,,,,

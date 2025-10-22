@@ -699,14 +699,17 @@ def summarizer_node(state: PipelineState) -> dict:
         us_status_tokens.extend(us_conflicts_list)
     us_status = f" ({'; '.join(us_status_tokens)})" if us_status_tokens else ""
     execution_filter_label = (regime_us.label.value if regime_us else 'n/a') + us_status
+    
+    # Save structured JSON snapshot separately (not in report.md)
+    artifacts_dir_path = state.get('artifacts_dir')
+    if artifacts_dir_path:
+        from pathlib import Path
+        from src.core.utils import save_json as save_json_util
+        snapshot_data = json.loads(structured_json)
+        save_json_util(snapshot_data, Path(artifacts_dir_path) / "data_snapshot.json")
+        logger.info("  ✓ Data snapshot saved to data_snapshot.json")
 
     summary_lines = [
-        "```json",
-        structured_json,
-        "```",
-        "",
-        "---",
-        "",
         f"# {symbol} Regime Analysis Report",
         f"**Generated:** {timestamp_est.strftime('%Y-%m-%d %H:%M:%S %Z')}",
         f"**Lookback Windows:** {lookback_line}",
