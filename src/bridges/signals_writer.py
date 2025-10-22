@@ -36,6 +36,24 @@ CSV_HEADERS = [
     "microstructure_bid_ask_spread_bps",
     "microstructure_ofi_imbalance",
     "microstructure_microprice",
+    # NEW: Transition metrics
+    "transition_flip_density",
+    "transition_median_duration",
+    "transition_entropy",
+    # NEW: LLM validation
+    "llm_context_verdict",
+    "llm_analytical_verdict",
+    "llm_confidence_adjustment",
+    # NEW: Forecast
+    "forecast_prob_up",
+    "forecast_expected_return",
+    "forecast_var95",
+    # NEW: Action-Outlook (v1.2)
+    "action_conviction",
+    "action_stability",
+    "action_bias",
+    "action_tactical_mode",
+    "action_sizing_pct",
 ]
 
 

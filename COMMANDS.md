@@ -1,245 +1,368 @@
-# 📋 Commands Cheat Sheet
+# 📋 Command Reference
 
-**Copy & Paste Ready - No Technical Knowledge Required**
-
-> **💡 Tip**: Bookmark this file! Everything you need is here.
+Quick reference for all available commands in the Regime Detector system.
 
 ---
 
-## 🚀 **Daily Use (Most Common)**
+## 🔍 Scanner Commands
 
-### **Analyze BTC with Full Backtest**
+### **Scan Universe**
 ```bash
-cd "/Users/justinborneo/Desktop/Desktop - Justin's MacBook Pro/Regime Detector Crypto"
-source .venv/bin/activate
-python -m src.ui.cli run --symbol X:BTCUSD --mode thorough
+# Scan all configured symbols (78 assets)
+python -m src.scanner.main
+
+# Output: artifacts/scanner/latest/scanner_report.md
+# Time: ~60 seconds
 ```
 
-**What you get**:
-- Complete regime analysis  
-- Best strategy selected automatically
-- Backtest results
-- Report in: `artifacts/X:BTCUSD/[date]/report.md`
-
-**Time**: ~30 seconds
-
----
-
-### **Quick Analysis (No Backtest)**
+### **Complete Scan + Analyze**
 ```bash
-cd "/Users/justinborneo/Desktop/Desktop - Justin's MacBook Pro/Regime Detector Crypto"
-source .venv/bin/activate
-python -m src.ui.cli run --symbol X:BTCUSD --mode fast
+# Scan → filter → analyze top 15
+./scan_and_analyze.sh
+
+# Output: Scanner report + Portfolio report
+# Time: ~16 minutes
 ```
 
-**Time**: ~5 seconds
-
 ---
 
-### **Analyze Multiple Symbols**
+## 📊 Single Asset Analysis
 
-#### Crypto
+### **Fast Mode** (No Backtest)
 ```bash
-cd "/Users/justinborneo/Desktop/Desktop - Justin's MacBook Pro/Regime Detector Crypto"
-source .venv/bin/activate
-python -m src.ui.cli run --symbol X:BTCUSD --mode thorough
+./analyze.sh --symbol SPY --mode fast
+./analyze.sh --symbol X:BTCUSD --mode fast
+./analyze.sh --symbol C:EURUSD --mode fast
+
+# Time: 30-60 seconds per asset
+# Gets: Regime, transition metrics, LLM validation, forecast, action-outlook
+```
+
+### **Thorough Mode** (With Backtest)
+```bash
+./analyze.sh --symbol NVDA --mode thorough
+
+# Alternative syntax:
 python -m src.ui.cli run --symbol X:ETHUSD --mode thorough
-python -m src.ui.cli run --symbol X:SOLUSD --mode thorough
+
+# Time: 5-10 minutes per asset
+# Gets: Everything from fast + backtest + optimized parameters
 ```
 
-#### Forex (10+ Years of Data!) 🎯
+### **Custom ST Timeframe**
 ```bash
-cd "/Users/justinborneo/Desktop/Desktop - Justin's MacBook Pro/Regime Detector Crypto"
-source .venv/bin/activate
-python -m src.ui.cli run --symbol C:EURUSD --mode thorough
-python -m src.ui.cli run --symbol C:GBPUSD --mode thorough
-python -m src.ui.cli run --symbol C:USDJPY --mode thorough
-```
-
-**Forex is perfect for showing to funds** - meets 10-year backtest requirement!
-
-**Note**: Use `C:` prefix for Forex symbols (Polygon format)
-
----
-
-## ☁️ **QuantConnect Cloud Validation (Optional)**
-
-### **Submit to QC After Analysis**
-```bash
-cd "/Users/justinborneo/Desktop/Desktop - Justin's MacBook Pro/Regime Detector Crypto"
-source .venv/bin/activate
-python scripts/submit_qc_backtest.py
-```
-
-**What happens**:
-- Uploads your selected strategy to QC
-- Runs backtest in cloud
-- Shows results
-- **Time**: 3-5 minutes
-
----
-
-### **Test QC Connection**
-```bash
-cd "/Users/justinborneo/Desktop/Desktop - Justin's MacBook Pro/Regime Detector Crypto"
-source .venv/bin/activate
-python scripts/test_qc_integration.py
-```
-
-Should show:
-```
-✓ API Token: abc123def4...
-✓ User ID: YOUR_QC_USER_ID
-✓ Project ID: YOUR_QC_PROJECT_ID
-✓ Signals: [X] rows
-✅ All tests passed!
+./analyze.sh --symbol X:BTCUSD --mode fast --st-bar 1h
 ```
 
 ---
 
-## 📊 **View Results**
+## 📈 Portfolio Analysis
 
-### **The report path is shown at the end of each run!**
-
-After running analysis, you'll see:
-```
-📍 Main Report:
-   artifacts/X:XRPUSD/2025-10-11/09-22-00/report.md
-
-Quick Actions:
-   Open: artifacts/X:XRPUSD/2025-10-11/09-22-00/report.md  ← Just copy this!
-```
-
-**Just click or copy the path shown!**
-
-### **Or use these commands:**
-
-#### Open in Cursor
+### **Default Portfolio**
 ```bash
-# The path is shown in the output - just click it in Cursor!
-# Or copy from the "Open:" line
+./analyze_portfolio.sh
+# Analyzes: BTC, ETH, SOL, XRP
 ```
 
-#### View in Terminal
+### **Preset Portfolios**
 ```bash
-cd "/Users/justinborneo/Desktop/Desktop - Justin's MacBook Pro/Regime Detector Crypto"
-
-# Copy the path from the output and paste:
-cat artifacts/X:XRPUSD/2025-10-11/09-22-00/report.md
+./analyze_portfolio.sh --top5    # BTC, ETH, SOL, XRP, BNB
+./analyze_portfolio.sh --forex   # Major currency pairs
 ```
 
-#### Open in Default App (macOS)
+### **Custom Selection**
 ```bash
-# Copy the path from the output and paste:
-open artifacts/X:XRPUSD/2025-10-11/09-22-00/report.md
+./analyze_portfolio.sh --custom SPY AAPL NVDA X:BTCUSD X:ETHUSD
+
+# Mix asset classes
+./analyze_portfolio.sh --custom SPY X:BTCUSD C:EURUSD
 ```
 
-### **Check Latest Signals**
+### **With Backtesting**
 ```bash
-cd "/Users/justinborneo/Desktop/Desktop - Justin's MacBook Pro/Regime Detector Crypto"
-cat data/signals/latest/signals.csv
-```
-
-### **View on QuantConnect**
-Open in browser:
-```
-https://www.quantconnect.com/terminal/YOUR_QC_PROJECT_ID
+./analyze_portfolio.sh --custom SPY NVDA --thorough
+# Time: ~8 min per asset
 ```
 
 ---
 
-## 🔧 **Testing**
+## 🎯 Execution Commands
 
-### **Run All Tests**
+### **Execute Signals** (Paper Trading)
 ```bash
-cd "/Users/justinborneo/Desktop/Desktop - Justin's MacBook Pro/Regime Detector Crypto"
-source .venv/bin/activate
-pytest tests/ -v
+# Execute latest signals (paper)
+python -m src.execution.cli execute --signals data/signals/latest/signals.csv --paper
+
+# Dry run (no orders)
+python -m src.execution.cli execute --signals data/signals/latest/signals.csv --dry-run
+
+# Live trading (be careful!)
+python -m src.execution.cli execute --signals data/signals/latest/signals.csv
+```
+
+### **Portfolio Status**
+```bash
+# Check paper account
+python -m src.execution.cli status --paper
+
+# Check live account
+python -m src.execution.cli status
+```
+
+### **Close Position**
+```bash
+# Close paper position
+python -m src.execution.cli close --symbol X:BTCUSD --paper
+
+# Close specific quantity
+python -m src.execution.cli close --symbol SPY --quantity 10 --paper
 ```
 
 ---
 
-## 🆘 **If Something Breaks**
+## 🛠️ Utility Commands
 
-### **Problem: "No module named 'langgraph'"**
+### **Makefile Shortcuts**
 ```bash
-cd "/Users/justinborneo/Desktop/Desktop - Justin's MacBook Pro/Regime Detector Crypto"
-source .venv/bin/activate
-pip install -r requirements.txt
+make analyze        # Quick BTC analysis
+make portfolio      # Default portfolio analysis
+make test           # Run test suite
 ```
 
-### **Problem: "QC credentials not found"**
-Check these files exist:
+### **View Latest Report**
 ```bash
-cd "/Users/justinborneo/Desktop/Desktop - Justin's MacBook Pro/Regime Detector Crypto"
-ls -la qc_token.txt qc_user.txt qc_project_id.txt
-```
+# Scanner
+cat artifacts/scanner/latest/scanner_report.md
 
-Should show all 3 files. If missing, recreate them.
+# Portfolio
+ls -t artifacts/portfolio_analysis_*.md | head -1 | xargs cat
 
-### **Problem: "Signals not found"**
-```bash
-cd "/Users/justinborneo/Desktop/Desktop - Justin's MacBook Pro/Regime Detector Crypto"
-# Run analysis first to generate signals
-source .venv/bin/activate
-python -m src.ui.cli run --symbol X:BTCUSD --mode thorough
-```
-
-### **Problem: "No spare nodes in QC"**
-1. Open: https://www.quantconnect.com/terminal/YOUR_QC_PROJECT_ID
-2. Delete old backtests to free space
-3. Try again
-
----
-
-## 📝 **Notes to Remember**
-
-1. **Always `cd` to project directory first**
-2. **Always `source .venv/bin/activate`** before Python commands
-3. **Use `thorough` mode** for full analysis with backtesting
-4. **Check `artifacts/` folder** for detailed results
-5. **Credentials are in .txt files** (gitignored, safe)
-
----
-
-## 🎯 **Most Useful Commands (Top 3)**
-
-### **#1: Full Analysis**
-```bash
-cd "/Users/justinborneo/Desktop/Desktop - Justin's MacBook Pro/Regime Detector Crypto" && source .venv/bin/activate && python -m src.ui.cli run --symbol X:BTCUSD --mode thorough
-```
-
-### **#2: Submit to QC**
-```bash
-cd "/Users/justinborneo/Desktop/Desktop - Justin's MacBook Pro/Regime Detector Crypto" && source .venv/bin/activate && python scripts/submit_qc_backtest.py
-```
-
-### **#3: Test QC Setup**
-```bash
-cd "/Users/justinborneo/Desktop/Desktop - Justin's MacBook Pro/Regime Detector Crypto" && source .venv/bin/activate && python scripts/test_qc_integration.py
+# Specific asset
+open artifacts/SPY/2025-10-22/12-30-45/report.md
 ```
 
 ---
 
-## 💡 **Pro Tip: Create Aliases**
+## 🔧 Configuration
 
-Add to your `~/.zshrc`:
-
+### **Edit Scanner Settings**
 ```bash
-# Regime Detector aliases
-alias regime='cd "/Users/justinborneo/Desktop/Desktop - Justin'\''s MacBook Pro/Regime Detector Crypto" && source .venv/bin/activate'
-alias analyze='regime && python -m src.ui.cli run --symbol'
-alias qc-submit='regime && python scripts/submit_qc_backtest.py'
-alias qc-test='regime && python scripts/test_qc_integration.py'
+nano config/scanner.yaml
+
+# Adjust:
+# - min_score (lower = more candidates)
+# - max_candidates_per_class
+# - scoring weights
 ```
 
-Then just use:
+### **Edit Main Settings**
 ```bash
-analyze X:BTCUSD --mode thorough
-qc-submit
+nano config/settings.yaml
+
+# Key sections:
+# - features.transition_metrics (enable/disable)
+# - market_intelligence.enhanced (microstructure)
+# - backtest.strategies (which strategies to test)
+```
+
+### **Edit Universe Files**
+```bash
+nano universes/crypto_top100.txt    # Add/remove crypto symbols
+nano universes/equities_sp500.txt   # Add/remove stocks
+nano universes/forex_majors.txt     # Add/remove FX pairs
 ```
 
 ---
 
-**Copy any command above and it will work!** No technical knowledge needed. 📋✨
+## 📁 Output Locations
 
+### **Scanner Results**
+```
+artifacts/scanner/latest/
+  scanner_report.md    # Human-readable
+  scanner_output.json  # Machine-readable
+```
+
+### **Portfolio Results**
+```
+artifacts/
+  portfolio_analysis_YYYYMMDD-HHMMSS.md
+```
+
+### **Individual Asset Results**
+```
+artifacts/SYMBOL/YYYY-MM-DD/HH-MM-SS/
+  report.md                  # Full markdown report
+  regime_mt.json             # MT regime decision
+  transition_metrics.json    # Per-tier transition data
+  action_outlook.json        # Fused positioning framework
+  dual_llm_research.json     # LLM validation
+  stochastic_outlook.json    # Monte Carlo forecast
+  features_*.json            # Statistical features per tier
+  metrics/                   # Transition snapshots
+```
+
+### **Signals Export**
+```
+data/signals/latest/signals.csv    # Latest signals (symlink)
+data/signals/YYYYMMDD-HHMMSS/signals.csv  # Timestamped
+```
+
+---
+
+## 🎯 Common Workflows
+
+### **Daily Trading**
+```bash
+# 1. Morning scan (1 min)
+python -m src.scanner.main
+
+# 2. Analyze top picks (15 min)
+./scan_and_analyze.sh
+
+# 3. Validate best 2-3 (15 min)
+./analyze.sh --symbol NVDA --mode thorough
+./analyze.sh --symbol X:ETHUSD --mode thorough
+
+# 4. Execute (paper)
+python -m src.execution.cli execute --signals data/signals/latest/signals.csv --paper
+```
+
+### **Quick Check**
+```bash
+# Check specific asset
+./analyze.sh --symbol SPY --mode fast
+
+# Compare a few
+./analyze_portfolio.sh --custom SPY NVDA X:BTCUSD
+```
+
+### **Deep Research**
+```bash
+# Full analysis with backtest
+./analyze.sh --symbol X:BTCUSD --mode thorough
+
+# Check all artifacts
+ls artifacts/X:BTCUSD/2025-10-22/*/
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### **Scanner finds too few candidates**
+```bash
+# Lower threshold in config/scanner.yaml
+output:
+  min_score: 25.0  # From 30.0
+```
+
+### **API rate limits**
+```bash
+# Reduce concurrent requests in config/scanner.yaml
+data:
+  concurrent_requests: 10  # From 15
+```
+
+### **No LLM validation**
+```bash
+# Check API keys
+echo $OPENAI_API_KEY
+echo $PERPLEXITY_API_KEY
+
+# Enable in config/settings.yaml
+market_intelligence:
+  enabled: true
+```
+
+### **Transition metrics show zeros**
+```bash
+# Already fixed - should populate immediately
+# If still issues, check:
+features:
+  transition_metrics:
+    enabled: true
+```
+
+---
+
+## 📊 Understanding Output
+
+### **Scanner Score** (0-100)
+- 25% Hurst/VR confidence
+- 20% Volatility (ATR, range)
+- 20% Momentum (% change, EMA)
+- 15% Participation (RVOL, volume)
+- 10% Regime clarity
+- 10% Data quality
+
+### **Portfolio Score** (0-100)
+- 25% Base confidence
+- 20% LLM validation
+- 20% Regime stability
+- 15% Regime clarity
+- 10% Forecast edge
+- 10% Data quality
+
+### **Action-Outlook**
+- **Conviction**: Fused confidence (regime + forecast + LLM)
+- **Stability**: Regime persistence (entropy + flip density)
+- **Sizing**: Conviction × stability × gate_clamp
+- **Mode**: Entry/exit approach based on alignment
+
+---
+
+## 🚀 Advanced Usage
+
+### **Custom Scanner Universe**
+```bash
+# Create custom watchlist
+cat > universes/my_watchlist.txt << EOF
+SPY
+QQQ
+AAPL
+NVDA
+X:BTCUSD
+X:ETHUSD
+EOF
+
+# Edit config/scanner.yaml to use it
+universes:
+  crypto: "universes/my_watchlist.txt"
+```
+
+### **Analyze Specific Tiers**
+```bash
+# Override ST timeframe
+./analyze.sh --symbol X:BTCUSD --mode fast --st-bar 1h
+```
+
+### **Batch Analysis**
+```bash
+# Loop through multiple
+for sym in SPY QQQ AAPL NVDA; do
+  ./analyze.sh --symbol $sym --mode fast
+done
+```
+
+---
+
+## 📚 Additional Resources
+
+- **docs/** - Project documentation
+- **tests/** - Test suite
+- **notebooks/** - Research notebooks
+- **reference_files/** - Legacy documentation
+
+---
+
+## 🆘 Getting Help
+
+1. Check **USER_GUIDE.md** (comprehensive)
+2. Check logs in artifacts/SYMBOL/DATE/TIME/
+3. Run with `--log-level DEBUG` for verbose output
+4. Check GitHub Issues
+
+---
+
+**For complete documentation, see [USER_GUIDE.md](USER_GUIDE.md)**

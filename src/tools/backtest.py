@@ -84,6 +84,68 @@ def carry_strategy(df: pd.DataFrame) -> pd.Series:
     return pd.Series(1, index=df.index)
 
 
+def bollinger_rsi_strategy(
+    df: pd.DataFrame,
+    bb_period: int = 20,
+    bb_std: float = 2.0,
+    rsi_period: int = 14,
+    rsi_oversold: int = 30,
+    rsi_overbought: int = 70,
+    atr_stop: float = 2.0,
+) -> pd.Series:
+    """
+    Combined Bollinger Bands + RSI mean-reversion strategy.
+    
+    Entry:
+    - Long: Price < BB_lower AND RSI < oversold
+    - Short: Price > BB_upper AND RSI > overbought
+    
+    Exit:
+    - Mean reversion to middle band
+    - RSI crosses neutral zone
+    - ATR-based stop loss
+    """
+    df = df.copy()
+    
+    # Bollinger Bands
+    df["bb_mid"] = df["close"].rolling(bb_period).mean()
+    df["bb_std"] = df["close"].rolling(bb_period).std()
+    df["bb_upper"] = df["bb_mid"] + (bb_std * df["bb_std"])
+    df["bb_lower"] = df["bb_mid"] - (bb_std * df["bb_std"])
+    
+    # RSI
+    delta = df["close"].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(rsi_period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(rsi_period).mean()
+    rs = gain / loss.replace(0, 1e-10)
+    rsi = 100 - (100 / (1 + rs))
+    df["rsi"] = rsi
+    
+    # Generate signals
+    signals = pd.Series(0, index=df.index)
+    position = 0
+    
+    for i in range(1, len(df)):
+        if position == 0:
+            # Entry conditions (both BB and RSI must agree)
+            if df["close"].iloc[i] < df["bb_lower"].iloc[i] and df["rsi"].iloc[i] < rsi_oversold:
+                position = 1  # Long (oversold)
+            elif df["close"].iloc[i] > df["bb_upper"].iloc[i] and df["rsi"].iloc[i] > rsi_overbought:
+                position = -1  # Short (overbought)
+        else:
+            # Exit conditions (mean reversion)
+            if position == 1:
+                if df["close"].iloc[i] >= df["bb_mid"].iloc[i] or df["rsi"].iloc[i] > 50:
+                    position = 0  # Exit long
+            elif position == -1:
+                if df["close"].iloc[i] <= df["bb_mid"].iloc[i] or df["rsi"].iloc[i] < 50:
+                    position = 0  # Exit short
+        
+        signals.iloc[i] = position
+    
+    return signals
+
+
 def rsi_strategy(df: pd.DataFrame, period: int = 14, oversold: int = 30, overbought: int = 70) -> pd.Series:
     """
     RSI mean-reversion strategy.
@@ -343,6 +405,7 @@ STRATEGIES = {
     "donchian": donchian_strategy,
     
     # Mean-reversion
+    "bollinger_rsi": bollinger_rsi_strategy,  # NEW: Combined strategy
     "bollinger_revert": bollinger_revert_strategy,
     "rsi": rsi_strategy,
     "keltner": keltner_strategy,

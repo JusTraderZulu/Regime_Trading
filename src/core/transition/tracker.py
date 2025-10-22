@@ -31,8 +31,33 @@ class TransitionTracker:
 			self._cur_label, self._cur_start = label, idx
 		self.labels.append(label)
 
+	def ingest_sequence(self, labels: list[Regime]):
+		"""Replace current window with a full sequence and rebuild runs."""
+		# Reset
+		self.labels.clear()
+		self.runs.clear()
+		self._cur_label = None
+		self._cur_start = 0
+		for i, l in enumerate(labels):
+			self.ingest(l, i)
+
 	def _durations(self) -> Dict[str, float]:
-		lens = [r[3] for r in list(self.runs)[-2000:]] or [0]
+		# Compute run lengths from the current label window (include ongoing run)
+		lab = list(self.labels)
+		if not lab:
+			return {"mean": 0.0, "median": 0.0, "p25": 0.0, "p75": 0.0}
+		lens: list[int] = []
+		cur = lab[0]
+		length = 1
+		for l in lab[1:]:
+			if l == cur:
+				length += 1
+			else:
+				lens.append(length)
+				cur = l
+				length = 1
+		# close final run
+		lens.append(length)
 		lens_sorted = sorted(lens)
 		def q(p: float) -> float:
 			if not lens_sorted:
@@ -66,11 +91,17 @@ class TransitionTracker:
 		duration = self._durations()
 		flip_density = self._flip_density()
 		probs = self._matrix()
-		entropy = -sum((p * math.log(p + 1e-12)) for a in probs for p in probs[a].values()) / 3.0
+		# Compute average row entropy (standard for Markov chains)
+		row_entropies = []
+		for from_state in probs:
+			row_ent = -sum(p * math.log(p) for p in probs[from_state].values() if p > 0)
+			row_entropies.append(row_ent)
+		entropy = sum(row_entropies) / len(row_entropies) if row_entropies else 0.0
+		
 		alerts = []
-		if flip_density > 0.02:
+		if flip_density > 0.15:  # Raised from 0.02 (2% too sensitive)
 			alerts.append("flip_density_high")
-		if duration["median"] < 3:
+		if duration["median"] < 2:  # Lowered from 3 bars
 			alerts.append("duration_too_short")
 		return TransitionStats(
 			tier=tier,
@@ -78,7 +109,7 @@ class TransitionTracker:
 			flip_density=flip_density,
 			duration=duration,
 			matrix=TransitionMatrix(probs=probs, entropy=float(entropy)),
-			hazard=HazardProfile(h_t={1: 0.18, 5: 0.11, 10: 0.08}),
+			hazard=HazardProfile(h_t={1: 0.18, 5: 0.11, 10: 0.08}),  # TODO: compute empirically
 			sigma_around_flip_ratio=sigma_ratio,
 			alerts=alerts,
 		)

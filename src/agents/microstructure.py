@@ -38,9 +38,11 @@ def microstructure_agent_node(state: PipelineState) -> PipelineState:
             logger.info("Microstructure analysis disabled in config")
             return state
 
+        # Allow microstructure for all asset classes if enhanced mode enabled
+        use_enhanced = mi_config.get('enhanced', False)
         asset_class = state.get("asset_class")
-        if asset_class and asset_class.upper() != "CRYPTO":
-            logger.info(f"Microstructure analysis skipped for asset class {asset_class}")
+        if not use_enhanced and asset_class and asset_class.upper() != "CRYPTO":
+            logger.info(f"Microstructure analysis skipped for asset class {asset_class} (enable 'enhanced' for all classes)")
             return state
 
         # Get the tiers to analyze (default to ST for microstructure)
@@ -65,8 +67,11 @@ def microstructure_agent_node(state: PipelineState) -> PipelineState:
 
             logger.info(f"Computing microstructure features for tier {tier} ({len(df)} bars)")
 
+            # Check if enhanced microstructure is enabled
+            use_enhanced = mi_config.get('enhanced', False) or config.get('data_sources', {}).get('enhanced_loader', {}).get('use_for', {}).get('microstructure', False)
+            
             # Run microstructure analysis
-            tier_results = create_microstructure_features(df, mi_config, Tier(tier), state['symbol'])
+            tier_results = create_microstructure_features(df, mi_config, Tier(tier), state['symbol'], use_enhanced=use_enhanced)
 
             if tier_results:
                 microstructure_results[tier] = tier_results

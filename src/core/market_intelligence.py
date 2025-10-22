@@ -200,7 +200,7 @@ Be specific, cite sources when possible, focus on actionable insights."""
    - Broader crypto/macro risks
 
 5. **Bottom Line:**
-   - Is now a good time to pay attention to {clean_symbol}?
+   - Is now a good time to pay attention to {symbol}?
    - What's the market narrative around it?
 
 Provide a concise but comprehensive market intelligence report (4-5 paragraphs)."""

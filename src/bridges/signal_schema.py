@@ -87,6 +87,71 @@ class SignalRow(BaseModel):
         default=None,
         description="Market efficiency assessment (high/moderate/low/unknown)"
     )
+    
+    # NEW: Transition metrics (regime stability)
+    transition_flip_density: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="Regime transition rate (lower = more stable)"
+    )
+    transition_median_duration: Optional[float] = Field(
+        default=None, ge=0.0,
+        description="Median bars before regime changes"
+    )
+    transition_entropy: Optional[float] = Field(
+        default=None, ge=0.0,
+        description="Transition matrix entropy (lower = stickier regimes)"
+    )
+    
+    # NEW: LLM validation
+    llm_context_verdict: Optional[str] = Field(
+        default=None,
+        description="Context LLM verdict (STRONG_CONFIRM/WEAK_CONFIRM/NEUTRAL/WEAK_CONTRADICT/STRONG_CONTRADICT)"
+    )
+    llm_analytical_verdict: Optional[str] = Field(
+        default=None,
+        description="Analytical LLM verdict"
+    )
+    llm_confidence_adjustment: Optional[float] = Field(
+        default=None, ge=-1.0, le=1.0,
+        description="Confidence adjustment from LLM validation (-0.1 to +0.1)"
+    )
+    
+    # NEW: Forecast data
+    forecast_prob_up: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="Probability price goes up over forecast horizon"
+    )
+    forecast_expected_return: Optional[float] = Field(
+        default=None,
+        description="Expected return from Monte Carlo"
+    )
+    forecast_var95: Optional[float] = Field(
+        default=None,
+        description="Value at Risk (95% confidence)"
+    )
+    
+    # NEW: Action-Outlook (v1.2 fused positioning)
+    action_conviction: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="Fused conviction score (regime + forecast + LLM)"
+    )
+    action_stability: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="Regime stability score (low flip/entropy)"
+    )
+    action_bias: Optional[str] = Field(
+        default=None,
+        description="Directional bias (bullish/bearish/neutral)"
+    )
+    action_tactical_mode: Optional[str] = Field(
+        default=None,
+        description="Tactical approach (full_trend/accumulate_on_dips/defer_entry/etc.)"
+    )
+    action_sizing_pct: Optional[float] = Field(
+        default=None, ge=0.0, le=100.0,
+        description="Recommended position sizing as % of max risk"
+    )
+    
     microstructure_liquidity: Optional[str] = Field(
         default=None,
         description="Liquidity assessment (high/moderate/low/unknown)"

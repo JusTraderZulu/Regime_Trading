@@ -130,6 +130,7 @@ ccm:
 market_intelligence:
   enabled: true  # Enable microstructure analysis
   tiers: ["ST"]  # Focus on short-term for microstructure
+  enhanced: true  # Enable enhanced estimators (Corwin-Schultz, Roll, Kyle, Amihud)
 
   # Microstructure features to compute
   features:
@@ -216,66 +217,33 @@ backtest:
   train_frac: 0.7
   min_trades: 10
   
-  # Strategy templates per regime
-  # Multiple strategies will be tested for each regime
-  # System will select best performing one
+  # Simplified Strategy Framework (2 core strategies)
+  # Regime-matched with ATR position sizing
   strategies:
     trending:
       - name: ma_cross
         params:
-          fast: [10, 20]
-          slow: [30, 50]
-      - name: ema_cross
-        params:
-          fast: [8, 12]
-          slow: [21, 26]
-      - name: macd
-        params:
-          fast: [12]
-          slow: [26]
-          signal: [9]
-      - name: donchian
-        params:
-          lookback: [20, 40]
+          fast: [10, 12, 16]
+          slow: [26, 34, 50]
+          atr_stop: [2.0, 2.5, 3.0]  # ATR-based stops
     mean_reverting:
-      - name: bollinger_revert
+      - name: bollinger_rsi
         params:
-          window: [20]
-          num_std: [2.0, 2.5]
-      - name: rsi
-        params:
-          period: [14]
-          oversold: [20, 30]
-          overbought: [70, 80]
-      - name: keltner
-        params:
-          period: [20]
-          atr_mult: [2.0]
-      - name: pairs_mean_reversion
-        enabled: false  # Enable and set benchmark_symbol per asset to activate
-        params:
-          benchmark_symbol: ["X:ETHUSD"]
-          benchmark_bar: ["4h"]
-          lookback: [60]
-          entry_z: [1.5]
-          exit_z: [0.5]
+          bb_period: [15, 20, 25, 30]
+          bb_std: [1.5, 2.0, 2.5]
+          rsi_period: [10, 14, 20]
+          rsi_oversold: [25, 30, 35]
+          rsi_overbought: [65, 70, 75]
+          atr_stop: [1.5, 2.0, 2.5]  # ATR-based stops
     random:
       - name: carry
-        params: {}
+        params: {}  # Don't backtest random regimes
     volatile_trending:
-      - name: atr_trend
+      - name: ma_cross
         params:
-          ma_period: [20]
-          atr_period: [14]
-          atr_mult: [2.0]
-      - name: donchian
-        params:
-          lookback: [20, 30]
-      - name: atr_trailing_stop
-        params:
-          ema_period: [21, 34]
-          atr_period: [14]
-          atr_mult: [2.5, 3.0]
+          fast: [8, 10]
+          slow: [21, 26]
+          atr_stop: [2.5, 3.0, 3.5]  # Wider stops for volatility
 
 # Regime classification thresholds
 # Adjusted for crypto market characteristics (more lenient)
@@ -421,13 +389,20 @@ report:
 features:
   transition_metrics:
     enabled: true
+    # New per-tier window bars; orchestrator falls back to legacy shape if present
+    window_bars:
+      LT: 1000
+      MT: 1656
+      ST: 1689
+      US: 1729
+    sigma_window: 5
+    persist_labels: true
+    persist_dir: "artifacts/warmstart"
+    # Backward-compat fields still honored if present
     persist: true
-    backfill_on_boot: false
-    windows:
-      bars: [1000, 3000]
-      tiers: ["LT","MT","ST","US"]
+    backfill_on_boot: true
     files:
-      dir: "metrics"  # stored under each run's artifacts dir
+      dir: "metrics"
 
   adaptive_hysteresis:
     enabled: true

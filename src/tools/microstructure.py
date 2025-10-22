@@ -2,14 +2,16 @@
 Microstructure analysis tools for high-frequency market data.
 
 Implements calculations for:
-- Bid-Ask Spread
+- Bid-Ask Spread (OHLCV proxy + Corwin-Schultz + Roll estimators)
 - Order Flow Imbalance (OFI)
 - Microprice
-- Price Impact
+- Price Impact (Kyle's Lambda, Amihud)
 - Trade Flow analysis
+- Enhanced academic estimators (Corwin & Schultz 2012, Roll 1984, Kyle 1985)
 """
 
 import logging
+import math
 import numpy as np
 import pandas as pd
 from datetime import datetime
@@ -37,14 +39,18 @@ class MicrostructureAnalyzer:
         self.ofi_windows = config.get('ofi', {}).get('window_sizes', [10, 25, 50])
         self.ofi_threshold = config.get('ofi', {}).get('threshold', 0.1)
 
-    def compute_bid_ask_spread(self, df: pd.DataFrame) -> pd.Series:
+    def compute_bid_ask_spread(self, df: pd.DataFrame, use_enhanced: bool = False) -> pd.Series:
         """
         Compute bid-ask spread metrics from OHLCV data.
 
-        Uses high-low range as proxy for spread in absence of order book data.
+        Uses multiple estimators:
+        - High-low range proxy (fast, always available)
+        - Corwin-Schultz estimator (academic, more accurate)
+        - Roll estimator (based on serial correlation)
 
         Args:
             df: DataFrame with OHLCV columns
+            use_enhanced: If True, compute academic estimators
 
         Returns:
             Series with spread statistics
@@ -54,17 +60,32 @@ class MicrostructureAnalyzer:
             logger.warning("Missing high/low columns for spread calculation")
             return pd.Series(dtype=float)
 
-        # Use high-low range as proxy for bid-ask spread
+        # Basic high-low range proxy (always computed)
         spreads = (df['high'] - df['low']) / df['close'] * 10000  # Convert to basis points
 
-        return pd.Series({
+        result = {
             'spread_mean_bps': spreads.mean(),
             'spread_median_bps': spreads.median(),
             'spread_std_bps': spreads.std(),
             'spread_min_bps': spreads.min(),
             'spread_max_bps': spreads.max(),
             'effective_spread_bps': 2 * spreads.std() if len(spreads) > 1 else spreads.mean()
-        })
+        }
+        
+        # Add enhanced estimators if requested
+        if use_enhanced:
+            from src.tools.microstructure_enhanced import (
+                compute_corwin_schultz_spread,
+                compute_roll_spread,
+                compute_enhanced_spread_metrics
+            )
+            
+            enhanced = compute_enhanced_spread_metrics(df)
+            result['corwin_schultz_bps'] = enhanced.get('corwin_schultz_bps')
+            result['roll_bps'] = enhanced.get('roll_bps')
+            result['consensus_bps'] = enhanced.get('consensus_bps')
+        
+        return pd.Series(result)
 
     def compute_order_flow_imbalance(self, df: pd.DataFrame) -> Dict[int, pd.Series]:
         """
@@ -217,12 +238,37 @@ class MicrostructureAnalyzer:
             logger.error(f"Error computing trade flow: {e}")
             return pd.Series(dtype=float)
 
-    def analyze_microstructure(self, df: pd.DataFrame) -> Dict:
+    def compute_enhanced_liquidity_metrics(self, df: pd.DataFrame, trades_df: Optional[pd.DataFrame] = None) -> Dict:
+        """
+        Compute enhanced liquidity and price impact metrics.
+        
+        Uses academic estimators from microstructure_enhanced module.
+        
+        Args:
+            df: OHLCV bars
+            trades_df: Optional trade data (for Kyle's lambda)
+            
+        Returns:
+            Dict with kyle_lambda, amihud, and other metrics
+        """
+        from src.tools.microstructure_enhanced import (
+            compute_kyle_lambda,
+            compute_amihud_illiquidity
+        )
+        
+        return {
+            'kyle_lambda_per_1m': compute_kyle_lambda(trades_df, df),
+            'amihud_illiquidity': compute_amihud_illiquidity(df),
+        }
+    
+    def analyze_microstructure(self, df: pd.DataFrame, use_enhanced: bool = False, trades_df: Optional[pd.DataFrame] = None) -> Dict:
         """
         Comprehensive microstructure analysis.
 
         Args:
             df: DataFrame with OHLCV + bid/ask/volume data
+            use_enhanced: If True, compute academic estimators
+            trades_df: Optional trade data for enhanced metrics
 
         Returns:
             Dictionary containing all microstructure features
@@ -231,6 +277,7 @@ class MicrostructureAnalyzer:
 
         results = {
             'bid_ask_spread': {},
+            'enhanced_liquidity': {} if use_enhanced else None,
             'order_flow_imbalance': {},
             'microprice': {},
             'price_impact': {},
@@ -240,7 +287,7 @@ class MicrostructureAnalyzer:
 
         # Compute each feature if data is available (OHLCV data)
         if 'high' in df.columns and 'low' in df.columns and 'close' in df.columns:
-            results['bid_ask_spread'] = self.compute_bid_ask_spread(df)
+            results['bid_ask_spread'] = self.compute_bid_ask_spread(df, use_enhanced=use_enhanced)
 
         if 'close' in df.columns and 'volume' in df.columns:
             results['order_flow_imbalance'] = self.compute_order_flow_imbalance(df)
@@ -251,6 +298,10 @@ class MicrostructureAnalyzer:
         if 'close' in df.columns and 'volume' in df.columns:
             results['price_impact'] = self.compute_price_impact(df)
             results['trade_flow'] = self.compute_trade_flow(df)
+        
+        # Compute enhanced liquidity metrics if enabled
+        if use_enhanced:
+            results['enhanced_liquidity'] = self.compute_enhanced_liquidity_metrics(df, trades_df)
 
         # Generate summary statistics
         results['summary'] = self._generate_microstructure_summary(results)
@@ -529,7 +580,7 @@ def fetch_crypto_quotes(symbol: str, start_date: str, end_date: str, api_key: st
     return pd.DataFrame()
 
 
-def create_microstructure_features(df: pd.DataFrame, config: Dict, tier: Tier, symbol: str) -> MicrostructureFeatures:
+def create_microstructure_features(df: pd.DataFrame, config: Dict, tier: Tier, symbol: str, use_enhanced: bool = False) -> MicrostructureFeatures:
     """
     Create microstructure features with proper Pydantic schema.
     Now enhanced with quotes-based analysis when available.
@@ -539,6 +590,7 @@ def create_microstructure_features(df: pd.DataFrame, config: Dict, tier: Tier, s
         config: Configuration dictionary
         tier: Market tier (LT, MT, ST)
         symbol: Trading symbol
+        use_enhanced: If True, compute academic estimators (Corwin-Schultz, Roll, Kyle, Amihud)
 
     Returns:
         MicrostructureFeatures object
@@ -569,8 +621,11 @@ def create_microstructure_features(df: pd.DataFrame, config: Dict, tier: Tier, s
         logger.info("✅ Using quotes-based microstructure analysis (95% quality)")
     else:
         analyzer = MicrostructureAnalyzer(config)
-        results = analyzer.analyze_microstructure(df)
-        logger.info("✅ Using OHLCV-based microstructure analysis (80% quality)")
+        results = analyzer.analyze_microstructure(df, use_enhanced=use_enhanced)
+        if use_enhanced:
+            logger.info("✅ Using enhanced OHLCV microstructure (Corwin-Schultz, Roll, Kyle, Amihud)")
+        else:
+            logger.info("✅ Using OHLCV-based microstructure analysis (80% quality)")
 
     # Convert raw results to Pydantic objects
     spread_data = results.get('bid_ask_spread', {})

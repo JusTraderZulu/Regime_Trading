@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
+import numpy as np
 import pytz
 
 from src.core.schemas import (
@@ -30,6 +31,11 @@ from src.core.utils import create_artifacts_dir
 from src.core.transition.tracker import TransitionTracker
 from src.core.transition.stats import suggest_hysteresis
 from src.core.transition.schema import AdaptiveSuggestion
+from src.core.transition.util import (
+    vote_labels_per_bar,
+    compute_sigma_post_pre,
+    derive_heuristic_labels,
+)
 from src.tools.regime_hysteresis import apply_adaptive_if_enabled
 from src.core.utils import save_json
 from src.core.progress import track_node
@@ -675,15 +681,51 @@ def detect_regime_node(state: PipelineState) -> Dict:
     features_cfg = config.get("features", {})
     tm_cfg = features_cfg.get("transition_metrics", {})
     tm_enabled = bool(tm_cfg.get("enabled", False))
-    tm_windows = tm_cfg.get("windows", {}).get("bars", []) if isinstance(tm_cfg.get("windows", {}), dict) else []
-    tm_tiers = tm_cfg.get("windows", {}).get("tiers", []) if isinstance(tm_cfg.get("windows", {}), dict) else []
+    # Support new per-tier shape and fallback to legacy windows.bars
+    window_bars_map = tm_cfg.get("window_bars") or {}
+    if isinstance(window_bars_map, dict) and window_bars_map:
+        tm_windows = sorted(set(int(v) for v in window_bars_map.values() if v is not None))
+        tm_tiers = list(window_bars_map.keys())
+    else:
+        tm_windows = tm_cfg.get("windows", {}).get("bars", []) if isinstance(tm_cfg.get("windows", {}), dict) else []
+        tm_tiers = tm_cfg.get("windows", {}).get("tiers", []) if isinstance(tm_cfg.get("windows", {}), dict) else []
     metrics_dir_name = tm_cfg.get("files", {}).get("dir", "metrics")
+    sigma_window = int(tm_cfg.get("sigma_window", 5))
+    persist_labels = bool(tm_cfg.get("persist_labels", False))
+    persist_dir = str(tm_cfg.get("persist_dir", "artifacts/warmstart"))
 
     # Create trackers cache on state
     trackers = state.get("_transition_trackers") if tm_enabled else None
     if tm_enabled and trackers is None:
         trackers = {(int(w), t): TransitionTracker(int(w)) for w in tm_windows for t in (tm_tiers or active_tiers)}
         state["_transition_trackers"] = trackers
+
+        # Optional backfill from prior run artifacts to avoid empty telemetry
+        try:
+            if tm_cfg.get("backfill_on_boot", False):
+                artifacts_dir = state.get("artifacts_dir")
+                if artifacts_dir:
+                    art_path = Path(artifacts_dir)
+                    symbol_root = art_path.parent  # artifacts/{symbol}/{YYYY-MM-DD}
+                    # Collect prior regime jsons for each tier
+                    for tier_name in active_tiers:
+                        files = sorted(symbol_root.glob(f"*/*/regime_{tier_name.lower()}.json"))
+                        # Ingest up to 3000 prior observations
+                        idx = 0
+                        for fp in files[-3000:]:
+                            try:
+                                data = json.loads(fp.read_text())
+                                label = data.get("label")
+                                if label in ("trending","mean_reverting","random"):
+                                    for w in tm_windows:
+                                        trk = trackers.get((int(w), tier_name))
+                                        if trk:
+                                            idx += 1
+                                            trk.ingest(label, idx)
+                            except Exception:
+                                continue
+        except Exception as bf_exc:
+            logger.debug(f"Transition backfill skipped: {bf_exc}")
 
     for tier_str in active_tiers:
         tier = Tier(tier_str)
@@ -775,71 +817,97 @@ def detect_regime_node(state: PipelineState) -> Dict:
                 f"Regime {tier_str}: {regime.label.value} (confidence={regime.confidence:.2f})"
             )
 
-            # Stage 1/2: read-only transition telemetry (no behavior change)
+            # Telemetry-only: build per-bar ensemble sequence and compute metrics
             if tm_enabled:
                 try:
-                    label_value = regime.label.value
-                    idx_monotonic = len(state.get(f"data_{tier_key}") or [])  # simple monotonic index proxy
-                    for w in tm_windows:
-                        trk = trackers.get((int(w), tier_str)) if trackers else None
-                        if trk:
-                            trk.ingest(label_value, idx_monotonic)
-                    # Periodically persist snapshots under current run artifacts
-                    if tm_cfg.get("persist", True) and (idx_monotonic % 20 == 0):
-                        artifacts_dir = state.get("artifacts_dir")
-                        if artifacts_dir:
-                            metrics_dir = Path(artifacts_dir) / metrics_dir_name
-                            for w in tm_windows:
-                                trk = trackers.get((int(w), tier_str))
-                                if trk:
-                                    snap = trk.snapshot(tier_str)
-                                    save_json(snap.model_dump(), metrics_dir / f"snap_{tier_str}_{int(w)}.json")
+                    # Determine window length for this tier
+                    tier_window = None
+                    if isinstance(window_bars_map, dict) and window_bars_map:
+                        tier_window = int(window_bars_map.get(tier_str, 0) or 0)
+                    if not tier_window:
+                        tier_window = int(sorted(tm_windows)[0]) if tm_windows else 0
 
-                    # Stage 2: compute adaptive suggestions in shadow mode (log + persist only)
-                    features_cfg = config.get("features", {}) if isinstance(config, dict) else {}
-                    adaptive_cfg = features_cfg.get("adaptive_hysteresis", {}) if isinstance(features_cfg, dict) else {}
-                    if adaptive_cfg.get("shadow_mode", True):
-                        # Use smallest window stats as the basis
+                    df = state.get(f"data_{tier_key}")
+                    if df is not None and hasattr(df, "tail") and tier_window:
+                        df_win = df.tail(tier_window)
+                        # Prefer native per-model labels if present on state (future extension)
+                        labels_by_model = {}
+                        # Fallback: heuristic models
+                        heur = derive_heuristic_labels(df_win, window=min(50, max(20, tier_window // 20)))
+                        for name, seq in heur.items():
+                            if seq:
+                                labels_by_model[name] = seq
+                        if not labels_by_model:
+                            # Ensure at least a random path exists
+                            labels_by_model["fallback_random"] = ["random"] * len(df_win)
+
+                        ensemble_seq = vote_labels_per_bar(labels_by_model)
+
+                        # Feed tracker for each configured window covering this tier
+                        for w in tm_windows or [len(ensemble_seq)]:
+                            trk = trackers.get((int(w), tier_str)) if trackers else None
+                            if trk:
+                                # Align to last w bars
+                                seq_w = ensemble_seq[-int(w):] if len(ensemble_seq) > int(w) else ensemble_seq
+                                trk.ingest_sequence(seq_w)
+
+                        # Compute sigma(post/pre) - keep alignment with ensemble_seq
+                        close_series = pd.to_numeric(df_win["close"], errors="coerce").ffill().bfill()
+                        rets = np.log(close_series).diff().fillna(0.0).tolist()
+                        flips = [i for i in range(1, len(ensemble_seq)) if ensemble_seq[i] != ensemble_seq[i - 1]]
+                        sigma_ratio = compute_sigma_post_pre(rets, flips, sigma_window)
+
+                        # Collect a snapshot for smallest window for report
                         if tm_windows:
                             w0 = int(sorted(tm_windows)[0])
                             trk0 = trackers.get((w0, tier_str)) if trackers else None
-                            if trk0:
-                                snap0 = trk0.snapshot(tier_str)
-                                base_gates = regime.gates
-                                base_m = getattr(base_gates, "m_bars", None) if base_gates else None
-                                base_enter = getattr(base_gates, "enter", None) if base_gates else None
-                                base_exit = getattr(base_gates, "exit", None) if base_gates else None
-                                if base_m is not None and base_enter is not None and base_exit is not None:
-                                    s = suggest_hysteresis(
-                                        stats=snap0,
-                                        base_m_bars=int(base_m),
-                                        base_enter=float(base_enter),
-                                        base_exit=float(base_exit),
-                                        clamps=adaptive_cfg.get("clamps", {}),
-                                        formulas=adaptive_cfg.get("formulas", {}),
-                                        tier=tier_str,
-                                    )
-                                    logger.info(f"[ADAPTIVE_HINT][{tier_str}] {s.rationale} → m_bars={s.suggest_m_bars}, enter={s.suggest_enter:.2f}, exit={s.suggest_exit:.2f}")
-                                    if tm_cfg.get("persist", True) and artifacts_dir:
-                                        save_json(s.model_dump(), metrics_dir / f"suggest_{tier_str}_{w0}.json")
+                        else:
+                            w0 = len(ensemble_seq)
+                            trk0 = None
+                        if trk0:
+                            snap = trk0.snapshot(tier_str, sigma_ratio=sigma_ratio)
+                        else:
+                            some = next((trackers[k] for k in trackers if k[1] == tier_str), None) if trackers else None
+                            snap = some.snapshot(tier_str, sigma_ratio=sigma_ratio) if some else None
+
+                        if snap is not None:
+                            tm_state = state.get("transition_metrics") or {}
+                            tm_state[tier_str] = snap.model_dump()
+                            state["transition_metrics"] = tm_state
+
+                        # Optional: persist snapshots under current run artifacts
+                        if tm_cfg.get("persist", True):
+                            artifacts_dir = state.get("artifacts_dir")
+                            if artifacts_dir:
+                                metrics_dir = Path(artifacts_dir) / metrics_dir_name
+                                for w in tm_windows or [len(ensemble_seq)]:
+                                    trk = trackers.get((int(w), tier_str)) if trackers else None
+                                    if trk:
+                                        snapw = trk.snapshot(tier_str, sigma_ratio=sigma_ratio)
+                                        save_json(snapw.model_dump(), metrics_dir / f"snap_{tier_str}_{int(w)}.json")
                 except Exception as tm_exc:
-                    logger.debug(f"Transition metrics skipped for {tier_str}: {tm_exc}")
+                    logger.warning(f"Transition metrics skipped for {tier_str}: {tm_exc}", exc_info=True)
         except Exception as e:
             logger.error(f"Failed to detect regime for {tier_str}: {e}")
             results[f"regime_{tier_key}"] = None
 
-    # Final snapshot at end of detection loop to ensure artifacts for report
+    # Final snapshot: save combined transition_metrics from state (already computed with correct sigma)
     if tm_enabled and tm_cfg.get("persist", True):
         try:
             artifacts_dir = state.get("artifacts_dir")
-            if artifacts_dir:
+            tm_state_final = state.get("transition_metrics")
+            if artifacts_dir and tm_state_final:
                 metrics_dir = Path(artifacts_dir) / metrics_dir_name
+                # Save the correctly-computed state metrics (includes sigma_ratio)
+                save_json(tm_state_final, metrics_dir / "transition_metrics.json")
+                # Also save individual tier snapshots from state for backward compatibility
                 for tier_str in active_tiers:
-                    for w in tm_windows:
-                        trk = trackers.get((int(w), tier_str)) if trackers else None
-                        if trk:
-                            snap = trk.snapshot(tier_str)
-                            save_json(snap.model_dump(), metrics_dir / f"snap_{tier_str}_{int(w)}.json")
+                    tier_snap = tm_state_final.get(tier_str)
+                    if tier_snap:
+                        # Save with the tier's configured window size
+                        tier_window = window_bars_map.get(tier_str) if isinstance(window_bars_map, dict) else None
+                        if tier_window:
+                            save_json(tier_snap, metrics_dir / f"snap_{tier_str}_{int(tier_window)}.json")
         except Exception as tm_exc:
             logger.debug(f"Final transition snapshot skipped: {tm_exc}")
 
@@ -889,6 +957,10 @@ def detect_regime_node(state: PipelineState) -> Dict:
 
     if memory_modified:
         save_regime_memory(regime_memory)
+    
+    # Propagate transition_metrics to next nodes
+    if tm_enabled and state.get("transition_metrics"):
+        results["transition_metrics"] = state["transition_metrics"]
 
     return results
 
@@ -1204,8 +1276,45 @@ def backtest_node(state: PipelineState) -> Dict:
             "primary_execution_tier": "MT",
         }
     
-    # Step 1: OPTIMIZE strategies for MT regime
-    logger.info(f"🎯 Optimizing strategies for {regime_mt.label.value} regime...")
+    # Step 1: Apply regime-adaptive adjustments based on transition metrics
+    transition_metrics = state.get('transition_metrics', {})
+    tm_mt = transition_metrics.get('MT', {})
+    flip_density = tm_mt.get('flip_density', 0.08)
+    median_duration = tm_mt.get('median_duration', 8)
+    entropy = tm_mt.get('entropy', 0.5)
+    
+    logger.info(f"🎯 Regime-Adaptive Backtesting for {regime_mt.label.value}")
+    logger.info(f"   Flip Density: {flip_density:.1%}, Median Duration: {median_duration:.0f} bars, Entropy: {entropy:.2f}")
+    
+    # Apply adaptive adjustments to strategy config
+    config_adapted = config.copy()
+    backtest_cfg = config_adapted.get('backtest', {})
+    
+    # Adaptive parameter adjustments based on regime stability
+    if flip_density > 0.10:  # Unstable regime (>10% flip rate)
+        logger.info("   → Unstable regime: Tightening stops, reducing size")
+        backtest_cfg['adaptive_multiplier_stops'] = 0.75
+        backtest_cfg['adaptive_multiplier_size'] = 0.75
+    elif flip_density < 0.05:  # Very stable (< 5% flip rate)
+        logger.info("   → Highly stable regime: Normal parameters")
+        backtest_cfg['adaptive_multiplier_stops'] = 1.0
+        backtest_cfg['adaptive_multiplier_size'] = 1.0
+    else:
+        backtest_cfg['adaptive_multiplier_stops'] = 0.9
+        backtest_cfg['adaptive_multiplier_size'] = 0.9
+    
+    if median_duration < 5:  # Short-lived regimes
+        logger.info("   → Short regime duration: Faster exits")
+        backtest_cfg['adaptive_exit_speed'] = 'fast'
+    
+    if entropy > 0.5:  # Chaotic transitions
+        logger.info("   → High entropy: Reducing position size")
+        backtest_cfg['adaptive_multiplier_size'] = backtest_cfg.get('adaptive_multiplier_size', 1.0) * 0.5
+    
+    config_adapted['backtest'] = backtest_cfg
+    
+    # Step 2: OPTIMIZE strategies for MT regime
+    logger.info(f"🎯 Optimizing parameters for {regime_mt.label.value} regime...")
     
     from src.tools.strategy_optimizer import optimize_for_regime
     from pathlib import Path
@@ -1218,7 +1327,7 @@ def backtest_node(state: PipelineState) -> Dict:
             data=data_mt,
             symbol=symbol,
             tier=Tier.MT,
-            config=config,
+            config=config_adapted,  # Use adapted config
             output_dir=optimization_dir,
         )
         
@@ -1237,9 +1346,13 @@ def backtest_node(state: PipelineState) -> Dict:
         logger.error(f"Optimization error: {e}")
         results['optimization_results_mt'] = None
     
-    # Step 2: Use MT (4H) regime to select strategy (now with optimized params)
+    # Step 3: Use MT (4H) regime to select strategy (now with optimized params)
     
     mt_regime = regime_mt.label
+    
+    # Log adaptive adjustments applied
+    if backtest_cfg.get('adaptive_multiplier_stops'):
+        logger.info(f"   Adaptive multipliers: stops={backtest_cfg['adaptive_multiplier_stops']:.2f}, size={backtest_cfg.get('adaptive_multiplier_size', 1.0):.2f}")
     
     # Check LT/MT alignment for context
     if regime_lt and regime_lt.label != mt_regime:
@@ -1430,8 +1543,66 @@ def export_signals_node(state: PipelineState) -> Dict:
 
             if hasattr(microstructure_data, 'microprice') and microstructure_data.microprice:
                 microstructure_microprice = microstructure_data.microprice.microprice_mean
+        
+        # NEW: Get transition metrics for this tier
+        transition_metrics = state.get('transition_metrics', {})
+        tm_tier = transition_metrics.get(tier_name, {})
+        transition_flip_density = tm_tier.get('flip_density')
+        transition_median_duration = tm_tier.get('duration', {}).get('median') if tm_tier else None
+        transition_entropy = tm_tier.get('matrix', {}).get('entropy') if tm_tier else None
+        
+        # NEW: Get LLM validation (from dual_llm_research)
+        dual_llm = state.get('dual_llm_research', {})
+        llm_context_verdict = None
+        llm_analytical_verdict = None
+        llm_confidence_adjustment = None
+        
+        if dual_llm:
+            # Extract verdicts from research text
+            from scripts.portfolio_analyzer import _extract_llm_verdict
+            context_research = dual_llm.get('context_agent', {}).get('research', '')
+            analytical_research = dual_llm.get('analytical_agent', {}).get('research', '')
+            llm_context_verdict = _extract_llm_verdict(context_research) if context_research else None
+            llm_analytical_verdict = _extract_llm_verdict(analytical_research) if analytical_research else None
+            
+            # Calculate confidence adjustment
+            verdict_scores = {
+                'STRONG_CONFIRM': 0.10,
+                'WEAK_CONFIRM': 0.05,
+                'NEUTRAL': 0.0,
+                'WEAK_CONTRADICT': -0.05,
+                'STRONG_CONTRADICT': -0.10,
+            }
+            if llm_context_verdict and llm_analytical_verdict:
+                llm_confidence_adjustment = (
+                    verdict_scores.get(llm_context_verdict, 0.0) +
+                    verdict_scores.get(llm_analytical_verdict, 0.0)
+                ) / 2.0
+        
+        # NEW: Get stochastic forecast for this tier
+        stochastic = state.get('stochastic')
+        forecast_prob_up = None
+        forecast_expected_return = None
+        forecast_var95 = None
+        
+        if stochastic and hasattr(stochastic, 'by_tier'):
+            tier_forecast = stochastic.by_tier.get(tier_name)
+            if tier_forecast:
+                forecast_prob_up = tier_forecast.prob_up
+                forecast_expected_return = tier_forecast.expected_return
+                forecast_var95 = tier_forecast.var_95
+        
+        # NEW: Get action-outlook for this tier
+        action_outlook = state.get('action_outlook', {})
+        action_conviction = action_outlook.get('conviction_score')
+        action_stability = action_outlook.get('stability_score')
+        action_bias = action_outlook.get('bias')
+        action_tactical_mode = action_outlook.get('tactical_mode')
+        action_sizing_pct = action_outlook.get('positioning', {}).get('sizing_x_max')
+        if action_sizing_pct is not None:
+            action_sizing_pct = action_sizing_pct * 100  # Convert to percentage
 
-        # Create signal row with microstructure data
+        # Create signal row with all available data
         signal = SignalRow(
             time=bar_time,
             symbol=qc_symbol,
@@ -1444,12 +1615,31 @@ def export_signals_node(state: PipelineState) -> Dict:
             mid=float(mid_price) if mid_price is not None else None,
             strategy_name=strategy_name,
             strategy_params=strategy_params,
+            # Microstructure
             microstructure_data_quality=microstructure_data_quality,
             microstructure_market_efficiency=microstructure_market_efficiency,
             microstructure_liquidity=microstructure_liquidity,
             microstructure_bid_ask_spread_bps=microstructure_bid_ask_spread_bps,
             microstructure_ofi_imbalance=microstructure_ofi_imbalance,
             microstructure_microprice=microstructure_microprice,
+            # NEW: Transition metrics
+            transition_flip_density=transition_flip_density,
+            transition_median_duration=transition_median_duration,
+            transition_entropy=transition_entropy,
+            # NEW: LLM validation
+            llm_context_verdict=llm_context_verdict,
+            llm_analytical_verdict=llm_analytical_verdict,
+            llm_confidence_adjustment=llm_confidence_adjustment,
+            # NEW: Forecast
+            forecast_prob_up=forecast_prob_up,
+            forecast_expected_return=forecast_expected_return,
+            forecast_var95=forecast_var95,
+            # NEW: Action-Outlook
+            action_conviction=action_conviction,
+            action_stability=action_stability,
+            action_bias=action_bias,
+            action_tactical_mode=action_tactical_mode,
+            action_sizing_pct=action_sizing_pct,
         )
         
         signals.append(signal)
@@ -1462,6 +1652,9 @@ def export_signals_node(state: PipelineState) -> Dict:
     if not signals:
         logger.warning("No signals generated")
         return {}
+    
+    # Sort signals by time to ensure chronological order
+    signals.sort(key=lambda s: s.time)
     
     # Determine output path
     run_id = state["timestamp"].strftime("%Y%m%d-%H%M%S")

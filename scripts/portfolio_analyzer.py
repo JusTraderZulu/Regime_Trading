@@ -25,6 +25,33 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.agents.graph import run_pipeline
 
 
+def _extract_llm_verdict(llm_text: str) -> str:
+    """Extract CONFIRM/CONTRADICT verdict from LLM output."""
+    if not llm_text:
+        return "NEUTRAL"
+    
+    text_upper = llm_text.upper()
+    
+    if "STRONG CONFIRM" in text_upper:
+        return "STRONG_CONFIRM"
+    elif "WEAK CONFIRM" in text_upper or "CONFIRMS" in text_upper:
+        return "WEAK_CONFIRM"
+    elif "STRONG CONTRADICT" in text_upper:
+        return "STRONG_CONTRADICT"
+    elif "WEAK CONTRADICT" in text_upper or "CONTRADICTS" in text_upper:
+        return "WEAK_CONTRADICT"
+    elif "NEUTRAL" in text_upper:
+        return "NEUTRAL"
+    
+    # Fallback
+    if "support" in llm_text.lower() or "consistent" in llm_text.lower():
+        return "WEAK_CONFIRM"
+    elif "contradict" in llm_text.lower() or "inconsistent" in llm_text.lower():
+        return "WEAK_CONTRADICT"
+    
+    return "NEUTRAL"
+
+
 def analyze_portfolio(symbols: List[str], mode: str = "fast") -> Dict[str, Any]:
     """
     Analyze multiple assets and compare opportunities.
@@ -54,7 +81,28 @@ def analyze_portfolio(symbols: List[str], mode: str = "fast") -> Dict[str, Any]:
             regime_st = state.get('regime_st')
             contradictor_st = state.get('contradictor_st')
             backtest_st = state.get('backtest_st')
+            backtest_mt = state.get('backtest_mt')
             microstructure_st = state.get('microstructure_st')
+            transition_metrics = state.get('transition_metrics', {})
+            dual_llm_research = state.get('dual_llm_research', {})
+            stochastic = state.get('stochastic')
+            
+            # Extract transition metrics for MT tier
+            tm_mt = transition_metrics.get('MT', {})
+            flip_density = tm_mt.get('flip_density', 0.1)
+            median_duration = tm_mt.get('duration', {}).get('median', 5)
+            entropy = tm_mt.get('matrix', {}).get('entropy', 0.5)
+            sigma_ratio = tm_mt.get('sigma_around_flip_ratio', 1.0)
+            
+            # Extract LLM verdicts
+            context_research = dual_llm_research.get('context_agent', {}).get('research', '')
+            analytical_research = dual_llm_research.get('analytical_agent', {}).get('research', '')
+            
+            # Extract stochastic forecast
+            stoch_mt = stochastic.by_tier.get('MT') if stochastic else None
+            prob_up = stoch_mt.prob_up if stoch_mt else 0.5
+            expected_return = stoch_mt.expected_return if stoch_mt else 0.0
+            var95 = stoch_mt.var_95 if stoch_mt else 0.0
             
             if regime_mt:
                 results[symbol] = {
@@ -67,8 +115,20 @@ def analyze_portfolio(symbols: List[str], mode: str = "fast") -> Dict[str, Any]:
                     'contradictor_flags': len(contradictor_st.contradictions) if contradictor_st else 0,
                     'adjusted_confidence': contradictor_st.adjusted_confidence if contradictor_st else regime_mt.confidence,
                     'data_quality': microstructure_st.summary.data_quality_score if (microstructure_st and microstructure_st.summary) else 0.5,
-                    'backtest_sharpe': backtest_st.sharpe if backtest_st else None,
-                    'backtest_alpha': backtest_st.alpha if backtest_st else None,
+                    'backtest_sharpe': (backtest_mt.sharpe if backtest_mt else None) or (backtest_st.sharpe if backtest_st else None),
+                    'backtest_alpha': (backtest_mt.alpha if backtest_mt else None) or (backtest_st.alpha if backtest_st else None),
+                    # NEW: Transition metrics
+                    'flip_density': flip_density,
+                    'median_duration': median_duration,
+                    'entropy': entropy,
+                    'sigma_ratio': sigma_ratio,
+                    # NEW: LLM validation
+                    'llm_context_verdict': _extract_llm_verdict(context_research),
+                    'llm_analytical_verdict': _extract_llm_verdict(analytical_research),
+                    # NEW: Stochastic forecast
+                    'prob_up': prob_up,
+                    'expected_return': expected_return,
+                    'var95': var95,
                 }
                 print(f"  ✓ {symbol}: {regime_mt.label.value} ({regime_mt.confidence:.0%} confidence)")
             else:
@@ -84,63 +144,77 @@ def analyze_portfolio(symbols: List[str], mode: str = "fast") -> Dict[str, Any]:
 
 def calculate_opportunity_score(asset_data: Dict[str, Any]) -> float:
     """
-    Calculate opportunity score (0-100) based on multiple factors.
+    Enhanced opportunity score (0-100) with transition metrics and LLM validation.
     
-    Factors:
-    - Confidence level (40%)
-    - Data quality (20%)
-    - Regime clarity (20%)
-    - Contradictor validation (10%)
-    - Backtest performance (10% if available)
+    NEW FORMULA (weights sum to 100):
+    - Base Confidence: 25%
+    - LLM Validation: 20%
+    - Regime Stability: 20%
+    - Regime Clarity: 15%
+    - Forecast Edge: 10%
+    - Data Quality: 10%
     """
     if not asset_data:
         return 0.0
     
-    # Base confidence score (40 points)
-    confidence_score = asset_data['adjusted_confidence'] * 40
+    # Base confidence score (25 points)
+    confidence_score = asset_data['adjusted_confidence'] * 25
     
-    # Data quality score (20 points)
-    data_quality_score = asset_data['data_quality'] * 20
+    # LLM validation score (20 points) - NEW!
+    llm_score = 0
+    context_verdict = asset_data.get('llm_context_verdict', 'NEUTRAL')
+    analytical_verdict = asset_data.get('llm_analytical_verdict', 'NEUTRAL')
     
-    # Regime clarity score (20 points)
-    # Higher score for trending or mean-reverting (clear regimes)
-    # Lower for random/uncertain
+    # Average both verdicts
+    verdict_scores = {
+        'STRONG_CONFIRM': 20,
+        'WEAK_CONFIRM': 12,
+        'NEUTRAL': 8,
+        'WEAK_CONTRADICT': 4,
+        'STRONG_CONTRADICT': 0,
+    }
+    llm_score = (verdict_scores.get(context_verdict, 8) + verdict_scores.get(analytical_verdict, 8)) / 2
+    
+    # Regime stability score (20 points) - NEW!
+    flip_density = asset_data.get('flip_density', 0.1)
+    median_duration = asset_data.get('median_duration', 5)
+    entropy = asset_data.get('entropy', 0.5)
+    
+    stability_score = 0
+    if flip_density < 0.05 and median_duration > 10:  # Very stable
+        stability_score = 20
+    elif flip_density < 0.08 and median_duration > 6:  # Stable
+        stability_score = 15
+    elif flip_density < 0.12:  # Moderate
+        stability_score = 10
+    else:  # Unstable
+        stability_score = 5
+    
+    # Bonus for low entropy (sticky regimes)
+    if entropy < 0.35:
+        stability_score = min(20, stability_score * 1.2)
+    
+    # Regime clarity score (15 points)
     regime = asset_data['regime']
     if regime in ['trending', 'mean_reverting']:
-        regime_score = 20
-    elif regime == 'volatile_trending':
         regime_score = 15
+    elif regime == 'volatile_trending':
+        regime_score = 10
     else:
-        regime_score = 5
+        regime_score = 0  # Don't trade random/uncertain
     
-    # Contradictor validation (10 points)
-    # Fewer flags = higher score
-    flags = asset_data['contradictor_flags']
-    if flags == 0:
-        contradictor_score = 10
-    elif flags <= 2:
-        contradictor_score = 5
-    else:
-        contradictor_score = 0
+    # Forecast edge score (10 points) - NEW!
+    prob_up = asset_data.get('prob_up', 0.5)
+    edge_score = 0
+    if prob_up > 0.60 or prob_up < 0.40:  # Strong directional edge
+        edge_score = 10
+    elif prob_up > 0.55 or prob_up < 0.45:  # Weak edge
+        edge_score = 5
     
-    # Backtest performance (10 points, if available)
-    backtest_score = 0
-    if asset_data['backtest_sharpe'] is not None:
-        sharpe = asset_data['backtest_sharpe']
-        if sharpe > 2.0:
-            backtest_score = 10
-        elif sharpe > 1.0:
-            backtest_score = 7
-        elif sharpe > 0.5:
-            backtest_score = 4
-        elif sharpe > 0:
-            backtest_score = 2
-    else:
-        # In fast mode, distribute backtest points to other factors
-        confidence_score *= 1.1
-        regime_score *= 1.05
+    # Data quality score (10 points)
+    data_quality_score = asset_data['data_quality'] * 10
     
-    total_score = confidence_score + data_quality_score + regime_score + contradictor_score + backtest_score
+    total_score = confidence_score + llm_score + stability_score + regime_score + edge_score + data_quality_score
     
     return min(100, total_score)  # Cap at 100
 
@@ -182,6 +256,10 @@ def generate_comparison_report(results: Dict[str, Any], output_path: str = None)
         report += f"**Opportunity Score:** {scored_assets[0]['score']:.1f}/100\n\n"
         report += f"- **Regime:** {top['regime']} ({top['confidence']:.0%} confidence)\n"
         report += f"- **Adjusted Confidence:** {top['adjusted_confidence']:.0%} (after contradictor)\n"
+        report += f"- **LLM Validation:** {top.get('llm_context_verdict', 'N/A')} (Context), {top.get('llm_analytical_verdict', 'N/A')} (Analytical)\n"
+        report += f"- **Regime Stability:** {top.get('flip_density', 0):.1%} flip/bar, median {top.get('median_duration', 0):.0f} bars\n"
+        report += f"- **Entropy:** {top.get('entropy', 0):.2f}/1.10 ({'HIGH stickiness' if top.get('entropy', 1) < 0.35 else 'MODERATE'})\n"
+        report += f"- **Forecast Edge:** P(up) {top.get('prob_up', 0.5):.0%}, Expected {top.get('expected_return', 0):.2%}\n"
         report += f"- **Data Quality:** {top['data_quality']:.0%}\n"
         report += f"- **Contradictor Flags:** {top['contradictor_flags']}\n"
         
@@ -211,9 +289,9 @@ def generate_comparison_report(results: Dict[str, Any], output_path: str = None)
     
     report += "\n---\n\n## 📊 Full Comparison Table\n\n"
     
-    # Comparison table
-    report += "| Rank | Symbol | Opportunity | Regime | Confidence | Adj. Conf | Flags | Data Quality | Strategy |\n"
-    report += "|------|--------|-------------|--------|------------|-----------|-------|--------------|----------|\n"
+    # Enhanced comparison table with transition metrics
+    report += "| Rank | Symbol | Score | Regime | Conf | LLM | Stability | Flip/Bar | Dur | P(up) | Strategy |\n"
+    report += "|------|--------|-------|--------|------|-----|-----------|----------|-----|-------|----------|\n"
     
     for i, asset in enumerate(scored_assets, 1):
         symbol = asset['symbol']
@@ -221,12 +299,36 @@ def generate_comparison_report(results: Dict[str, Any], output_path: str = None)
         data = asset['data']
         
         strategy = "Momentum" if data['regime'] == 'trending' else (
-            "Mean-Rev" if data['regime'] == 'mean_reverting' else "Hold"
+            "BB+RSI" if data['regime'] == 'mean_reverting' else "Hold"
         )
         
-        report += f"| {i} | {symbol} | {score:.1f}/100 | {data['regime'][:8]} | "
-        report += f"{data['confidence']:.0%} | {data['adjusted_confidence']:.0%} | "
-        report += f"{data['contradictor_flags']} | {data['data_quality']:.0%} | {strategy} |\n"
+        # Simplify LLM verdict display
+        llm_display = ""
+        context_v = data.get('llm_context_verdict', 'NEUTRAL')
+        if 'STRONG_CONFIRM' in context_v:
+            llm_display = "✅✅"
+        elif 'WEAK_CONFIRM' in context_v or 'CONFIRM' in context_v:
+            llm_display = "✅"
+        elif 'CONTRADICT' in context_v:
+            llm_display = "❌"
+        else:
+            llm_display = "➖"
+        
+        # Stability display
+        flip_d = data.get('flip_density', 0.1)
+        median_d = data.get('median_duration', 5)
+        if flip_d < 0.06 and median_d > 10:
+            stability = "HIGH"
+        elif flip_d < 0.10 and median_d > 5:
+            stability = "MED"
+        else:
+            stability = "LOW"
+        
+        prob_up = data.get('prob_up', 0.5)
+        
+        report += f"| {i} | {symbol} | {score:.1f} | {data['regime'][:8]} | "
+        report += f"{data['confidence']:.0%} | {llm_display} | {stability} | "
+        report += f"{flip_d:.1%} | {median_d:.0f} | {prob_up:.0%} | {strategy} |\n"
     
     report += "\n---\n\n## 🎯 Position Allocation Suggestions\n\n"
     
@@ -270,6 +372,21 @@ def generate_comparison_report(results: Dict[str, Any], output_path: str = None)
         report += f"- Hurst: {data['hurst']:.3f}\n"
         report += f"- VR: {data['vr_statistic']:.3f}\n\n"
         
+        report += "**Regime Stability:**\n"
+        report += f"- Flip Density: {data.get('flip_density', 0):.1%}/bar (regime changes ~every {int(1/max(data.get('flip_density', 0.1), 0.01))} bars)\n"
+        report += f"- Median Duration: {data.get('median_duration', 0):.0f} bars\n"
+        report += f"- Entropy: {data.get('entropy', 0):.2f}/1.10 ({'sticky' if data.get('entropy', 1) < 0.4 else 'chaotic'})\n"
+        report += f"- Volatility @ Flips: σ(post)/σ(pre) = {data.get('sigma_ratio', 1.0):.2f}\n\n"
+        
+        report += "**LLM Validation:**\n"
+        report += f"- Context Agent: {data.get('llm_context_verdict', 'N/A')}\n"
+        report += f"- Analytical Agent: {data.get('llm_analytical_verdict', 'N/A')}\n\n"
+        
+        report += "**Forecast:**\n"
+        report += f"- P(up): {data.get('prob_up', 0.5):.0%}\n"
+        report += f"- Expected Return: {data.get('expected_return', 0):.2%}\n"
+        report += f"- VaR95: {data.get('var95', 0):.2%}\n\n"
+        
         report += "**Quality Assessment:**\n"
         report += f"- Data Quality: {data['data_quality']:.0%}\n"
         report += f"- Contradictor Flags: {data['contradictor_flags']}\n"
@@ -285,12 +402,18 @@ def generate_comparison_report(results: Dict[str, Any], output_path: str = None)
     report += f"""
 ## 📝 Methodology
 
-**Opportunity Score Calculation:**
-- Adjusted Confidence: 40%
-- Data Quality: 20%
-- Regime Clarity: 20%
-- Contradictor Validation: 10%
-- Backtest Performance: 10% (if available)
+**Enhanced Opportunity Score Calculation:**
+- Base Confidence: 25%
+- LLM Validation (Context + Analytical): 20%
+- Regime Stability (Flip Density + Duration + Entropy): 20%
+- Regime Clarity (Trending/Mean-Rev vs Random): 15%
+- Forecast Edge (P(up) directional bias): 10%
+- Data Quality: 10%
+
+**Regime Stability Metrics:**
+- Flip Density: Regime transition rate (lower = more stable)
+- Median Duration: Typical regime persistence in bars
+- Entropy: Transition matrix randomness (lower = stickier regimes)
 
 **Position Sizing Guidelines:**
 - 75%+ confidence: Full position (75-100% of max)
@@ -374,6 +497,7 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
 
 
 

@@ -71,28 +71,80 @@ class DualLLMResearchAgent:
         regime_lt = state.get('regime_lt')
         regime_mt = state.get('regime_mt')
         regime_st = state.get('regime_st')
+        regime_us = state.get('regime_us')
 
         # Get key regime information
         primary_regime = regime_mt.label.value if regime_mt else 'unknown'
         primary_confidence = regime_mt.confidence if regime_mt else 0.0
 
         # Get statistical features
+        features_lt = state.get('features_lt')
         features_st = state.get('features_st')
         features_mt = state.get('features_mt')
+        
+        # Get transition metrics
+        transition_metrics = state.get('transition_metrics', {})
+        tm_mt = transition_metrics.get('MT', {})
+        tm_st = transition_metrics.get('ST', {})
+        
+        # Get stochastic forecast
+        stochastic = state.get('stochastic')
+        stoch_mt = stochastic.by_tier.get('MT') if stochastic else None
+        stoch_st = stochastic.by_tier.get('ST') if stochastic else None
+        
+        # Get backtest results if available
+        backtest_mt = state.get('backtest_mt')
+        backtest_st = state.get('backtest_st')
 
-        return {
+        context = {
             'symbol': symbol,
             'primary_regime': primary_regime,
             'primary_confidence': primary_confidence,
             'regime_lt': regime_lt.label.value if regime_lt else 'unknown',
             'regime_mt': primary_regime,
             'regime_st': regime_st.label.value if regime_st else 'unknown',
-            'hurst_st': features_st.hurst_rs if features_st else 0,
+            'regime_us': regime_us.label.value if regime_us else 'unknown',
+            'hurst_lt': features_lt.hurst_rs if features_lt else 0,
             'hurst_mt': features_mt.hurst_rs if features_mt else 0,
-            'vr_st': features_st.vr_statistic if features_st else 0,
+            'hurst_st': features_st.hurst_rs if features_st else 0,
+            'vr_lt': features_lt.vr_statistic if features_lt else 0,
             'vr_mt': features_mt.vr_statistic if features_mt else 0,
+            'vr_st': features_st.vr_statistic if features_st else 0,
+            'vr_p_mt': features_mt.vr_p_value if features_mt else 1.0,
+            'vr_p_st': features_st.vr_p_value if features_st else 1.0,
+            'adf_p_mt': features_mt.adf_p_value if features_mt else 1.0,
+            'adf_p_st': features_st.adf_p_value if features_st else 1.0,
             'timestamp': state.get('timestamp')
         }
+        
+        # Add transition metrics if available
+        if tm_mt:
+            context.update({
+                'flip_density_mt': tm_mt.get('flip_density', 0),
+                'median_duration_mt': tm_mt.get('duration', {}).get('median', 0),
+                'entropy_mt': tm_mt.get('matrix', {}).get('entropy', 0),
+            })
+        
+        # Add stochastic forecast if available
+        if stoch_mt:
+            context.update({
+                'prob_up_mt': stoch_mt.prob_up,
+                'expected_return_mt': stoch_mt.expected_return,
+                'var95_mt': stoch_mt.var_95,
+                'price_q05_mt': stoch_mt.price_quantiles.get('q05', 0),
+                'price_q95_mt': stoch_mt.price_quantiles.get('q95', 0),
+                'horizon_days_mt': stoch_mt.horizon_days,
+            })
+        
+        # Add backtest metrics if available
+        if backtest_mt:
+            context.update({
+                'sharpe_mt': backtest_mt.sharpe,
+                'win_rate_mt': backtest_mt.win_rate,
+                'max_dd_mt': backtest_mt.max_drawdown,
+            })
+        
+        return context
 
     def _conduct_context_research(self, context: Dict[str, Any]) -> Optional[str]:
         """Conduct real-time context research using Perplexity."""
@@ -103,7 +155,7 @@ class DualLLMResearchAgent:
         prompt = self._build_context_prompt(context)
 
         try:
-            response = self.context_llm.generate(prompt, max_tokens=800, temperature=0.6)
+            response = self.context_llm.generate(prompt, max_tokens=1200, temperature=0.4)
             return response
         except Exception as e:
             logger.error(f"Context research failed: {e}")
@@ -118,7 +170,7 @@ class DualLLMResearchAgent:
         prompt = self._build_analytical_prompt(context)
 
         try:
-            response = self.analytical_llm.generate(prompt, max_tokens=800, temperature=0.6)
+            response = self.analytical_llm.generate(prompt, max_tokens=1500, temperature=0.3)
             return response
         except Exception as e:
             logger.error(f"Analytical research failed: {e}")
@@ -126,50 +178,181 @@ class DualLLMResearchAgent:
 
     def _build_context_prompt(self, context: Dict[str, Any]) -> str:
         """Build prompt for context agent (real-time market data)."""
+        
+        # Build transition metrics section if available
+        transition_section = ""
+        if context.get('flip_density_mt') is not None:
+            flip_pct = context['flip_density_mt'] * 100
+            median_dur = context.get('median_duration_mt', 0)
+            entropy = context.get('entropy_mt', 0)
+            transition_section = f"""
+Regime Stability Metrics:
+- Flip Density: {flip_pct:.1f}% per bar (regime changes ~every {int(1/max(context['flip_density_mt'], 0.01))} bars)
+- Median Duration: {median_dur:.0f} bars before regime typically changes
+- Entropy: {entropy:.2f} (0=deterministic, 1.1=max chaos → {"LOW" if entropy < 0.4 else "HIGH"} regime stickiness)
+"""
+        
+        # Build forecast section if available
+        forecast_section = ""
+        if context.get('prob_up_mt') is not None:
+            prob_up = context['prob_up_mt'] * 100
+            exp_ret = context['expected_return_mt'] * 100
+            var95 = context['var95_mt'] * 100
+            q05 = context.get('price_q05_mt', 0)
+            q95 = context.get('price_q95_mt', 0)
+            horizon = context.get('horizon_days_mt', 0)
+            forecast_section = f"""
+Price Forecast (Monte Carlo, {horizon:.1f} days):
+- Probability Up: {prob_up:.1f}%
+- Expected Return: {exp_ret:+.2f}%
+- Downside Risk (VaR95): {var95:.2f}%
+- 90% Confidence Range: ${q05:.2f} - ${q95:.2f}
+"""
+        
         return f"""
-You are a real-time market intelligence analyst. Based on current market data for {context['symbol']}, provide up-to-the-minute market context and insights.
+You are a real-time market intelligence analyst with access to current market data.
 
-Current Market Regime: {context['primary_regime']} ({context['primary_confidence']:.1%} confidence)
+=== QUANTITATIVE REGIME ANALYSIS (YOUR TASK: VALIDATE OR CHALLENGE) ===
 
-Statistical Indicators:
-- Short-term Hurst: {context['hurst_st']:.3f}
-- Medium-term Hurst: {context['hurst_mt']:.3f}
-- Short-term VR: {context['vr_st']:.3f}
-- Medium-term VR: {context['vr_mt']:.3f}
+Symbol: {context['symbol']}
+Detected Regime: {context['primary_regime']} ({context['primary_confidence']:.1%} confidence)
 
-Please provide:
-1. Current market sentiment and recent news affecting {context['symbol']}
-2. Key support/resistance levels
-3. Recent price action and volume trends
-4. Any significant events or catalysts in the last 24-48 hours
-5. Market positioning and institutional activity
+Statistical Signals:
+- Hurst: ST={context['hurst_st']:.3f}, MT={context['hurst_mt']:.3f} (>0.55=trending, <0.45=mean-rev, ~0.5=random)
+- VR: ST={context['vr_st']:.3f}, MT={context['vr_mt']:.3f} (>1.05=trending, <0.95=mean-rev)
+{transition_section}{forecast_section}
+=== YOUR MISSION ===
 
-Focus on real-time, actionable intelligence that could impact trading decisions.
+Provide CONCISE market intelligence that **CONFIRMS or CONTRADICTS** the quantitative analysis:
+
+1. **Sentiment Validation** (last 48h):
+   - Does market sentiment/news SUPPORT the "{context['primary_regime']}" classification?
+   - Recent events that CONFIRM or CONTRADICT this regime?
+   - Are traders behaving as if market is {context['primary_regime']}?
+
+2. **Price Action Reality Check**:
+   - Do current price patterns align with {context['primary_regime']} behavior?
+   - Support/resistance levels consistent with forecast range?
+   - Volume/orderflow confirming or denying the regime?
+
+3. **Institutional Positioning**:
+   - Options flow/unusual activity suggesting different regime?
+   - Large players positioning for {context['primary_regime']} or against it?
+   - Any divergence between "smart money" and regime signal?
+
+4. **Regime Invalidation Risks**:
+   - What news/event would FLIP the regime in next few bars?
+   - Upcoming catalysts that could break current pattern?
+   - Sentiment extremes suggesting regime about to change?
+
+5. **Bottom Line - AGREE or DISAGREE**:
+   - Rate confidence in regime: STRONG CONFIRM / WEAK CONFIRM / NEUTRAL / WEAK CONTRADICT / STRONG CONTRADICT
+   - If disagreeing: What regime does market context suggest instead?
+   - Top 2 reasons for your assessment
+
+Format: Short bullets, DATA not opinions, SPECIFIC not vague.
 """
 
     def _build_analytical_prompt(self, context: Dict[str, Any]) -> str:
         """Build prompt for analytical agent (deep quantitative analysis)."""
+        
+        # Build transition metrics section
+        transition_section = ""
+        if context.get('flip_density_mt') is not None:
+            flip_density = context['flip_density_mt']
+            median_dur = context.get('median_duration_mt', 0)
+            entropy = context.get('entropy_mt', 0)
+            bars_to_flip = int(1 / max(flip_density, 0.01))
+            transition_section = f"""
+Transition Dynamics:
+- Flip Density: {flip_density:.3f}/bar → regime persists ~{bars_to_flip} bars on average
+- Median Duration: {median_dur:.0f} bars (50% of regimes last ≤{median_dur} bars)
+- Entropy: {entropy:.2f}/1.10 max ({"sticky" if entropy < 0.4 else "chaotic"} regimes)
+"""
+        
+        # Build forecast section
+        forecast_section = ""
+        if context.get('prob_up_mt') is not None:
+            prob_up = context['prob_up_mt'] * 100
+            exp_ret = context['expected_return_mt'] * 100
+            var95 = context['var95_mt'] * 100
+            q05 = context.get('price_q05_mt', 0)
+            q95 = context.get('price_q95_mt', 0)
+            horizon = context.get('horizon_days_mt', 0)
+            bias = "bullish edge" if prob_up > 55 else ("bearish edge" if prob_up < 45 else "no edge")
+            forecast_section = f"""
+Stochastic Forecast ({horizon:.1f}d Monte Carlo, 2000 paths):
+- P(up): {prob_up:.1f}% → {bias}
+- Expected Return: {exp_ret:+.2f}% ± volatility
+- VaR95: {var95:.2f}% (95% confidence downside)
+- Price Range (90% CI): ${q05:.2f} to ${q95:.2f}
+"""
+        
+        # Build backtest section
+        backtest_section = ""
+        if context.get('sharpe_mt') is not None:
+            sharpe = context['sharpe_mt']
+            win_rate = context.get('win_rate_mt', 0) * 100
+            max_dd = context.get('max_dd_mt', 0) * 100
+            backtest_section = f"""
+Backtest Performance ({context['primary_regime']} regime):
+- Sharpe Ratio: {sharpe:.2f}
+- Win Rate: {win_rate:.1f}%
+- Max Drawdown: {max_dd:.1f}%
+"""
+        
         return f"""
-You are a quantitative market analyst. Analyze the following market regime data for {context['symbol']} and provide deep analytical insights.
+You are a PhD-level quantitative analyst specializing in regime-switching models.
 
-Market Regime Analysis:
-- Primary Regime: {context['primary_regime']} ({context['primary_confidence']:.1%} confidence)
-- LT Regime: {context['regime_lt']}
-- MT Regime: {context['regime_mt']}
-- ST Regime: {context['regime_st']}
+=== REGIME CLASSIFICATION (YOUR TASK: VALIDATE CONSISTENCY) ===
 
-Quantitative Indicators:
-- Hurst Exponents: ST={context['hurst_st']:.3f}, MT={context['hurst_mt']:.3f}
-- Variance Ratios: ST={context['vr_st']:.3f}, MT={context['vr_mt']:.3f}
+Primary (MT): {context['primary_regime']} ({context['primary_confidence']:.1%} confidence)
+Tier Alignment: LT={context['regime_lt']}, MT={context['regime_mt']}, ST={context['regime_st']}, US={context.get('regime_us', 'n/a')}
 
-Please provide:
-1. Technical interpretation of the regime detection
-2. Statistical significance and reliability assessment
-3. Potential regime transition indicators
-4. Quantitative trading implications
-5. Risk assessment based on the statistical profile
+=== STATISTICAL EVIDENCE ===
 
-Provide rigorous, data-driven analysis with clear reasoning.
+**Hurst Exponents** (long-range dependence):
+- LT: {context.get('hurst_lt', 0):.3f}, MT: {context['hurst_mt']:.3f}, ST: {context['hurst_st']:.3f}
+- Theory: H>0.55→trending (persistent), H<0.45→mean-reverting (anti-persistent), H≈0.5→random walk
+
+**Variance Ratio Tests** (autocorrelation structure):
+- MT: {context['vr_mt']:.3f} (p={context.get('vr_p_mt', 1):.3f}), ST: {context['vr_st']:.3f} (p={context.get('vr_p_st', 1):.3f})
+- Theory: VR>1→trending, VR<1→mean-reversion, VR≈1→random walk
+- Statistical Sig: p<0.05 = reject random walk hypothesis
+
+**Stationarity (ADF unit root)**:
+- MT: p={context.get('adf_p_mt', 1):.4f}, ST: p={context.get('adf_p_st', 1):.4f}
+- p<0.05 = stationary (favors mean-reversion)
+{transition_section}{forecast_section}{backtest_section}
+=== YOUR ANALYSIS (BE QUANTITATIVE) ===
+
+1. **Internal Consistency Check**:
+   - Are Hurst, VR, and ADF signals MUTUALLY CONSISTENT with "{context['primary_regime']}"?
+   - Do all tiers agree, or is there cross-timeframe divergence?
+   - RED FLAGS: Identify any contradictions in the statistical evidence
+
+2. **Regime Confidence Validation**:
+   - Is {context['primary_confidence']:.0%} confidence JUSTIFIED by evidence strength?
+   - Given p-values and effect sizes, should confidence be higher/lower?
+   - Statistical power: adequate sample size for reliable inference?
+
+3. **Transition Risk Assessment**:
+   - Given flip density and entropy, what's PROBABILITY of regime flip in next {context.get('median_duration_mt', 8):.0f} bars?
+   - Does transition matrix suggest this regime is stable or about to break?
+   - Leading indicators to monitor for regime change?
+
+4. **Trading Tactics** (be SPECIFIC):
+   - Given regime + forecast, is there exploitable edge?
+   - Entry timing: immediate or wait for confirmation?
+   - Position sizing: what Kelly fraction given Sharpe/drawdown?
+   - Stop placement: volatility-based (ATR) or technical levels?
+
+5. **Confirm or Contradict**:
+   - **VERDICT**: Does quantitative evidence SUPPORT or CONTRADICT "{context['primary_regime']}" at {context['primary_confidence']:.0%}?
+   - If contradicting: What regime does the data ACTUALLY suggest?
+   - Confidence adjustment: Should be raised/lowered by how much?
+
+Provide QUANTITATIVE reasoning with numbers/formulas. NO vague generalities.
 """
 
 

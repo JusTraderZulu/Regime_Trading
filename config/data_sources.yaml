@@ -1,0 +1,43 @@
+# Enhanced Data Sources Configuration
+
+# Enable enhanced data loader (with fallback to existing loaders)
+enhanced_loader:
+  enabled: true   # Enable for testing
+  
+  # Which features use enhanced loader
+  use_for:
+    microstructure: true   # Enhanced microstructure estimators
+    scanner: false         # Scanner uses existing (fast)
+    regime: false          # Regime uses existing (tested)
+
+# Data source preferences by asset class
+preferences:
+  equities:
+    primary: "polygon"     # Try Polygon first
+    fallback: "alpaca"     # Fall back to Alpaca
+    granularities: ["1s", "1m", "5m", "15m", "1h", "1d"]
+    
+  crypto:
+    primary: "polygon"     # Polygon only (Alpaca doesn't support)
+    fallback: null
+    granularities: ["1s", "1m", "5m", "15m", "1h", "1d"]
+    
+  forex:
+    primary: "polygon"     # Polygon only (Alpaca doesn't support)
+    fallback: null
+    granularities: ["1s", "1m", "5m", "15m", "1h", "1d"]
+
+# What data types to fetch (when enhanced loader enabled)
+fetch:
+  bars: true              # OHLCV bars
+  trades: true            # Tick data (not available for FX)
+  quotes: true            # NBBO/top-of-book
+  l2: false               # L2 orderbook (advanced, optional)
+
+# Timeouts and retries
+api:
+  timeout_seconds: 30
+  max_retries: 2
+  retry_delay_seconds: 1
+  concurrent_requests: 15  # For batch fetching
+

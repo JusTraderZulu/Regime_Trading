@@ -1005,15 +1005,40 @@ def summarizer_node(state: PipelineState) -> dict:
             context_agent.get("research"),
             analytical_agent.get("research"),
         )
+        
+        # Extract CONFIRM/CONTRADICT verdicts from LLM outputs
+        context_verdict = _extract_verdict(context_agent.get("research", ""))
+        analytical_verdict = _extract_verdict(analytical_agent.get("research", ""))
+        
+        # Build synthesis with validation results
+        synthesis_lines = ["### Research Synthesis", ""]
+        
+        # Show verdict summary
+        if context_verdict or analytical_verdict:
+            synthesis_lines.append("**Regime Validation Results:**")
+            if context_verdict:
+                synthesis_lines.append(f"- Context Agent: {context_verdict}")
+            if analytical_verdict:
+                synthesis_lines.append(f"- Analytical Agent: {analytical_verdict}")
+            synthesis_lines.append("")
+        
+        # Calculate confidence adjustment based on verdicts
+        confidence_adjustment = _calculate_confidence_adjustment(
+            context_verdict, 
+            analytical_verdict,
+            mt_effective_conf if 'mt_effective_conf' in locals() else 0.5
+        )
+        
         if comparison.get("synthesis"):
-            summary_lines.extend([
-                "### Research Synthesis",
-                "",
+            synthesis_lines.extend([
                 f"**Key Insights:** {comparison['synthesis']}",
                 "",
-                f"**Confidence Boost:** +{comparison['confidence_boost']:.1%} from agent agreement",
-                "",
             ])
+        
+        synthesis_lines.append(f"**Confidence Adjustment:** {confidence_adjustment}")
+        synthesis_lines.append("")
+        
+        summary_lines.extend(synthesis_lines)
 
     summary_md = "\n".join(summary_lines)
 
@@ -1021,36 +1046,92 @@ def summarizer_node(state: PipelineState) -> dict:
     try:
         artifacts_path = Path(artifacts_dir)
         metrics_dir = artifacts_path / "metrics"
-        if metrics_dir.exists():
-            rows = [
-                "## Regime Transition Metrics",
-                "Tier | Window | Flip Density | Median Dur | Entropy | Sigma Post/Pre | Alerts",
-                "---- | ------ | ------------ | ---------- | ------- | -------------- | ------",
-            ]
-            # Heuristic: show the smallest window per tier if multiple
+        # Prefer in-memory state first
+        tm_state = state.get("transition_metrics") if isinstance(state, dict) else None
+        rows = [
+            "## Regime Transition Metrics",
+            "Tier | Window | Flip Density | Median Dur | Entropy | Sigma Post/Pre | Alerts",
+            "---- | ------ | ------------ | ---------- | ------- | -------------- | ------",
+        ]
+        wrote_any = False
+        if tm_state:
             for tier_name in ["LT","MT","ST","US"]:
-                # pick any snap_{tier}_*.json, prefer smaller window
+                snap = tm_state.get(tier_name)
+                if not snap:
+                    continue
+                flip_density = float(snap.get("flip_density", 0.0))
+                median_dur = float((snap.get("duration", {}) or {}).get("median", 0.0))
+                entropy = float((snap.get("matrix", {}) or {}).get("entropy", 0.0))
+                sigma_ratio = float(snap.get("sigma_around_flip_ratio", 1.0))
+                window = int(snap.get("window_bars", 0))
+                alerts = ",".join(snap.get("alerts", []) or []) or "-"
+                if window <= 0:
+                    rows.append(f"{tier_name} | 0 | collecting… | collecting… | collecting… | collecting… | -")
+                else:
+                    rows.append(
+                        f"{tier_name} | {window} | {flip_density:.3f} | {median_dur:.0f} | {entropy:.2f} | {sigma_ratio:.2f} | {alerts}"
+                    )
+                wrote_any = True
+        # Fallback to on-disk snapshots
+        if not wrote_any and metrics_dir.exists():
+            for tier_name in ["LT","MT","ST","US"]:
                 snaps = sorted(metrics_dir.glob(f"snap_{tier_name}_*.json"), key=lambda p: int(p.stem.split("_")[-1]))
                 if snaps:
                     try:
                         snap = json.loads(snaps[0].read_text())
-                        # Treat zeros as collecting… indicators
                         flip_density = snap.get("flip_density", 0.0)
                         median_dur = snap.get("duration", {}).get("median", 0.0)
                         entropy = snap.get("matrix", {}).get("entropy", 0.0)
                         sigma_ratio = snap.get("sigma_around_flip_ratio", 1.0)
                         window = snap.get("window_bars", 0)
                         alerts = ",".join(snap.get("alerts", [])) or "-"
-                        if median_dur == 0 and flip_density == 0:
-                            rows.append(f"{tier_name} | {window} | collecting… | collecting… | collecting… | collecting… | -")
+                        if int(window) <= 0:
+                            rows.append(f"{tier_name} | 0 | collecting… | collecting… | collecting… | collecting… | -")
                         else:
                             rows.append(
-                                f"{tier_name} | {window} | {flip_density:.3f} | {median_dur:.0f} | {entropy:.2f} | {sigma_ratio:.2f} | {alerts}"
+                                f"{tier_name} | {int(window)} | {float(flip_density):.3f} | {float(median_dur):.0f} | {float(entropy):.2f} | {float(sigma_ratio):.2f} | {alerts}"
                             )
+                        wrote_any = True
                     except Exception:
                         continue
-            if len(rows) > 3:
-                summary_md += "\n\n" + "\n".join(rows) + "\n"
+        if wrote_any:
+            summary_md += "\n\n" + "\n".join(rows) + "\n"
+        
+        # Add interpretation section for transition metrics (separate from table rendering)
+        if tm_state and wrote_any:
+            interp_lines = ["", "**Transition Metrics Interpretation:**"]
+            tm_mt = tm_state.get("MT", {})
+            if tm_mt:
+                flip_d = tm_mt.get("flip_density", 0)
+                median_d = tm_mt.get("duration", {}).get("median", 0)
+                ent = tm_mt.get("matrix", {}).get("entropy", 0)
+                sigma = tm_mt.get("sigma_around_flip_ratio", 1.0)
+                
+                # Interpret flip density
+                if flip_d > 0:
+                    bars_to_flip = int(1 / flip_d)
+                    interp_lines.append(f"- **Regime Persistence**: {flip_d:.1%} flip/bar → expect regime change every ~{bars_to_flip} bars")
+                
+                # Interpret median duration
+                if median_d > 0:
+                    interp_lines.append(f"- **Typical Duration**: 50% of regimes last ≤{median_d:.0f} bars before flipping")
+                
+                # Interpret entropy
+                if ent > 0:
+                    stability = "LOW stickiness (chaotic)" if ent > 0.6 else ("MEDIUM stickiness" if ent > 0.4 else "HIGH stickiness (stable)")
+                    interp_lines.append(f"- **Regime Stability**: Entropy {ent:.2f}/1.10 → {stability}")
+                
+                # Interpret sigma ratio
+                if sigma != 1.0:
+                    vol_change = "increases" if sigma > 1.05 else ("decreases" if sigma < 0.95 else "unchanged")
+                    interp_lines.append(f"- **Volatility Around Flips**: σ(post)/σ(pre) = {sigma:.2f} → volatility {vol_change} after regime changes")
+                
+                # Trading implication
+                if median_d > 0 and flip_d > 0:
+                    expected_remaining = int(median_d * 0.5)  # Rough estimate
+                    interp_lines.append(f"- **Trading Implication**: Current regime likely stable for {expected_remaining}-{median_d:.0f} more bars; monitor for flip signals")
+            
+            summary_md += "\n" + "\n".join(interp_lines) + "\n"
 
             # Append shadow adaptive suggestions if present
             rows2 = ["", "### Adaptive Hysteresis Suggestions (shadow)", "Tier | Suggest m_bars | Enter | Exit | Rationale", "---- | ------------- | ----- | ---- | ---------"]
@@ -1090,6 +1171,50 @@ def summarizer_node(state: PipelineState) -> dict:
             summary_md += f"\n**QC Backtest**: https://www.quantconnect.com/terminal/{qc_project_id}/{qc_backtest_id}\n"
 
     st_conf_value = st_effective_conf
+    
+    # Build action-outlook fusion
+    try:
+        from src.core.action_outlook import build_action_outlook
+        action_outlook = build_action_outlook(state)
+        logger.info(f"Action-Outlook: {action_outlook['bias']}, conviction={action_outlook['conviction_score']:.0%}, mode={action_outlook['tactical_mode']}")
+        
+        # Add to summary_md
+        summary_md += f"""
+
+## 🎯 Action-Outlook — Probability-Based Positioning
+
+**Conviction:** {action_outlook['conviction_score']*100:.0f}/100 ({['low', 'moderate', 'good', 'high'][min(3, int(action_outlook['conviction_score']*4))]})  
+**Stability:** {action_outlook['stability_score']*100:.0f}/100 (regime persistence)  
+**Bias:** {action_outlook['bias'].replace('_', ' ').title()}
+
+**Positioning:**
+- **Sizing:** {action_outlook['positioning']['sizing_x_max']*100:.0f}% of max risk ({action_outlook['positioning']['sizing_x_max']:.2f}x)
+- **Directional Exposure:** {action_outlook['positioning']['directional_exposure']:+.2f} ({'net long' if action_outlook['positioning']['directional_exposure'] > 0 else ('net short' if action_outlook['positioning']['directional_exposure'] < 0 else 'neutral')})
+- **Leverage:** {action_outlook['positioning']['leverage_hint']}
+
+**Tactical Mode:** {action_outlook['tactical_mode'].replace('_', ' ').title()}
+
+"""
+        
+        # Add levels if available
+        if action_outlook['levels']['entry_zones']:
+            summary_md += f"**Entry Zones:** {', '.join([f'${z[0]:,.2f}-${z[1]:,.2f}' for z in action_outlook['levels']['entry_zones']])}\n"
+        if action_outlook['levels']['breakout_level']:
+            summary_md += f"**Breakout Level:** ${action_outlook['levels']['breakout_level']:,.2f}\n"
+        if action_outlook['levels']['invalidations']:
+            summary_md += f"**Invalidation:** {'; '.join(action_outlook['levels']['invalidations'])}\n"
+        
+        summary_md += f"""
+**Next Checks:**
+"""
+        if action_outlook['next_checks']['confirmations']:
+            for conf in action_outlook['next_checks']['confirmations']:
+                summary_md += f"- ✓ Confirm: {conf}\n"
+        summary_md += f"- ⚠️ Re-evaluate: {action_outlook['next_checks']['reevaluate_after']}\n"
+        
+    except Exception as e:
+        logger.warning(f"Failed to build action-outlook: {e}")
+        action_outlook = None
 
     exec_report = ExecReport(
         symbol=symbol,
@@ -1111,11 +1236,83 @@ def summarizer_node(state: PipelineState) -> dict:
         backtest_sharpe=backtest_st.sharpe if backtest_st else (backtest_mt.sharpe if backtest_mt else None),
         backtest_max_dd=backtest_st.max_drawdown if backtest_st else (backtest_mt.max_drawdown if backtest_mt else None),
     )
+    
+    # Store action_outlook in state for signals export
+    if action_outlook:
+        state['action_outlook'] = action_outlook
 
     logger.info(f"Summarizer: Report generated ({len(summary_md)} chars)")
     logger.info(f"Primary execution: MT regime={mt_regime.value}, strategy={primary_strategy_name}")
 
     return {"exec_report": exec_report}
+
+
+def _extract_verdict(llm_text: str) -> str:
+    """Extract CONFIRM/CONTRADICT verdict from LLM output."""
+    if not llm_text:
+        return ""
+    
+    text_upper = llm_text.upper()
+    
+    # Look for explicit verdict keywords
+    if "STRONG CONFIRM" in text_upper or "STRONGLY CONFIRM" in text_upper:
+        return "✅ STRONG CONFIRM"
+    elif "WEAK CONFIRM" in text_upper or "CONFIRMS" in text_upper or "CONSISTENT" in text_upper:
+        return "✅ WEAK CONFIRM"
+    elif "STRONG CONTRADICT" in text_upper or "STRONGLY CONTRADICT" in text_upper:
+        return "❌ STRONG CONTRADICT"
+    elif "WEAK CONTRADICT" in text_upper or "CONTRADICTS" in text_upper or "INCONSISTENT" in text_upper:
+        return "⚠️ WEAK CONTRADICT"
+    elif "NEUTRAL" in text_upper:
+        return "➖ NEUTRAL"
+    
+    # Fallback: sentiment analysis
+    confirm_keywords = ["support", "align", "consistent", "confirm", "validate"]
+    contradict_keywords = ["contradict", "disagree", "inconsistent", "challenge", "oppose"]
+    
+    text_lower = llm_text.lower()
+    confirms = sum(1 for kw in confirm_keywords if kw in text_lower)
+    contradicts = sum(1 for kw in contradict_keywords if kw in text_lower)
+    
+    if confirms > contradicts + 1:
+        return "✅ IMPLIED CONFIRM"
+    elif contradicts > confirms + 1:
+        return "⚠️ IMPLIED CONTRADICT"
+    
+    return "➖ NEUTRAL"
+
+
+def _calculate_confidence_adjustment(
+    context_verdict: str, 
+    analytical_verdict: str, 
+    base_conf: float
+) -> str:
+    """Calculate confidence adjustment based on LLM verdicts."""
+    
+    # Map verdicts to adjustment scores
+    verdict_scores = {
+        "✅ STRONG CONFIRM": +0.10,
+        "✅ WEAK CONFIRM": +0.05,
+        "✅ IMPLIED CONFIRM": +0.03,
+        "➖ NEUTRAL": 0.0,
+        "⚠️ WEAK CONTRADICT": -0.05,
+        "⚠️ IMPLIED CONTRADICT": -0.03,
+        "❌ STRONG CONTRADICT": -0.10,
+    }
+    
+    context_adj = verdict_scores.get(context_verdict, 0.0)
+    analytical_adj = verdict_scores.get(analytical_verdict, 0.0)
+    
+    # Average the adjustments
+    total_adj = (context_adj + analytical_adj) / 2.0
+    adjusted_conf = max(0.0, min(1.0, base_conf + total_adj))
+    
+    if total_adj > 0:
+        return f"+{total_adj:.1%} from LLM validation → {base_conf:.1%} → {adjusted_conf:.1%}"
+    elif total_adj < 0:
+        return f"{total_adj:.1%} from LLM contradictions → {base_conf:.1%} → {adjusted_conf:.1%}"
+    else:
+        return f"No adjustment (LLM neutral) → {base_conf:.1%}"
 
 
 def _interpret_fusion(regime_lt, regime_mt, regime_st, ccm_st) -> str:

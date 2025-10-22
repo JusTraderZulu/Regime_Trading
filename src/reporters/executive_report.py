@@ -143,6 +143,21 @@ def _save_artifacts(state: PipelineState, artifacts_dir: Path) -> None:
             artifacts_dir / "exec_report.json",
         )
     
+    # Transition metrics (combined by tier) if present
+    tm_state = state.get("transition_metrics")
+    if tm_state:
+        metrics_path = artifacts_dir / "metrics"
+        metrics_path.mkdir(parents=True, exist_ok=True)
+        save_json(tm_state, metrics_path / "transition_metrics.json")
+    
+    # Action-outlook (v1.2 positioning framework) if present
+    action_outlook = state.get("action_outlook")
+    if action_outlook:
+        save_json(
+            action_outlook,
+            artifacts_dir / "action_outlook.json",
+        )
+    
     # Strategy comparison
     strategy_comparison = state.get("strategy_comparison_st")
     if strategy_comparison:

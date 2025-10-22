@@ -113,6 +113,8 @@ class PipelineState(TypedDict, total=False):
     # === Diagnostics / Metrics ===
     execution_metrics: Optional[Dict[str, Any]]
     equity_meta: Optional[Dict[str, Any]]
+    transition_metrics: Optional[Dict[str, Any]]  # Per-tier transition telemetry
+    action_outlook: Optional[Dict[str, Any]]  # Fused positioning framework (v1.2)
 
     # === Config ===
     config: Optional[Dict[str, Any]]

@@ -36,3 +36,4 @@ class AdaptiveSuggestion(BaseModel):
 	rationale: str
 
 
+

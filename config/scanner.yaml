@@ -1,0 +1,89 @@
+# Multi-Asset Scanner Configuration
+
+# Universe files to scan
+universes:
+  crypto: "universes/crypto_top100.txt"
+  equities: "universes/equities_sp500.txt"
+  forex: "universes/forex_majors.txt"
+
+# Which universes to scan (set to false to skip)
+enabled:
+  crypto: true
+  equities: true
+  forex: true
+
+# Data fetching
+data:
+  timeframes:
+    - "1d"    # Daily for trend context
+    - "4h"    # Medium-term momentum
+    - "15m"   # Intraday setup
+  lookback_bars: 100  # Per timeframe
+  concurrent_requests: 15  # Async batch size
+  retry_attempts: 2
+
+# Metric computation
+metrics:
+  # Fast Hurst estimator (DFA on small window)
+  hurst:
+    method: "dfa"
+    window: 50  # Fast computation
+    
+  # Variance ratio (2-lag proxy)
+  variance_ratio:
+    lag: 2
+    
+  # Technical indicators
+  ema:
+    short: 20
+    long: 50
+  rsi:
+    period: 14
+  atr:
+    period: 14
+  
+  # Volume metrics
+  volume:
+    lookback: 20  # For RVOL calculation
+    
+  # Range metrics
+  range_zscore:
+    lookback: 20
+
+# Scoring weights (must sum to 1.0)
+scoring:
+  weights:
+    hurst_vr_confidence: 0.25  # Regime clarity from H and VR
+    volatility: 0.20            # ATR% + Range Z-Score
+    momentum: 0.20              # % Change + EMA slope
+    participation: 0.15         # RVOL + Volume Z
+    regime_clarity: 0.10        # |H - 0.5| distance from random
+    data_quality: 0.10          # Completeness, outliers
+  
+  # Thresholds for signal heuristics
+  thresholds:
+    trending:
+      hurst_min: 0.52
+      vr_max: 1.00
+      atr_pct_min: 0.015
+      rvol_min: 1.5
+    mean_reverting:
+      hurst_max: 0.48
+      vr_min: 1.00
+      rsi_oversold: 35
+      rsi_overbought: 65
+
+# Output filtering
+output:
+  max_candidates_per_class: 10  # Top N per asset class
+  min_score: 30.0                # Minimum score to include (lowered from 40)
+  save_dir: "artifacts/scanner"
+  
+  # What to include in report
+  report:
+    show_all_metrics: true
+    include_rejected: false  # Don't show low-score assets
+    
+# API keys (use from environment)
+# ALPACA_API_KEY, ALPACA_SECRET_KEY, POLYGON_API_KEY
+
