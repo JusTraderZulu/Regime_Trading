@@ -28,9 +28,239 @@ SYMBOL_MAP = {
     
     "XRP-USD": "XRPUSD",
     "X:XRPUSD": "XRPUSD",
+    "X:XRP-USD": "XRPUSD",
     "XRPUSD": "XRPUSD",
     
-    # Forex (internal → QC)
+    # Additional Crypto (comprehensive mapping)
+    "AAVE-USD": "AAVEUSD",
+    "X:AAVEUSD": "AAVEUSD",
+    "AAVEUSD": "AAVEUSD",
+    
+    "ADA-USD": "ADAUSD",
+    "X:ADAUSD": "ADAUSD",
+    "ADAUSD": "ADAUSD",
+    
+    "ALGO-USD": "ALGOUSD",
+    "X:ALGOUSD": "ALGOUSD",
+    "ALGOUSD": "ALGOUSD",
+    
+    "APT-USD": "APTUSD",
+    "X:APTUSD": "APTUSD",
+    "APTUSD": "APTUSD",
+    
+    "ARB-USD": "ARBUSD",
+    "X:ARBUSD": "ARBUSD",
+    "ARBUSD": "ARBUSD",
+    
+    "AR-USD": "ARUSD",
+    "X:ARUSD": "ARUSD",
+    "ARUSD": "ARUSD",
+    
+    "ATOM-USD": "ATOMUSD",
+    "X:ATOMUSD": "ATOMUSD",
+    "ATOMUSD": "ATOMUSD",
+    
+    "AVAX-USD": "AVAXUSD",
+    "X:AVAXUSD": "AVAXUSD",
+    "AVAXUSD": "AVAXUSD",
+    
+    "AXS-USD": "AXSUSD",
+    "X:AXSUSD": "AXSUSD",
+    "AXSUSD": "AXSUSD",
+    
+    "BCH-USD": "BCHUSD",
+    "X:BCHUSD": "BCHUSD",
+    "BCHUSD": "BCHUSD",
+    
+    "BNB-USD": "BNBUSD",
+    "X:BNBUSD": "BNBUSD",
+    "BNBUSD": "BNBUSD",
+    
+    "BONK-USD": "BONKUSD",
+    "X:BONKUSD": "BONKUSD",
+    "BONKUSD": "BONKUSD",
+    
+    "DOG-USD": "DOGUSD",
+    "X:DOGUSD": "DOGUSD",
+    "DOGUSD": "DOGUSD",
+    
+    "DOT-USD": "DOTUSD",
+    "X:DOTUSD": "DOTUSD",
+    "DOTUSD": "DOTUSD",
+    
+    "DYDX-USD": "DYDXUSD",
+    "X:DYDXUSD": "DYDXUSD",
+    "DYDXUSD": "DYDXUSD",
+    
+    "EOS-USD": "EOSUSD",
+    "X:EOSUSD": "EOSUSD",
+    "EOSUSD": "EOSUSD",
+    
+    "ETC-USD": "ETCUSD",
+    "X:ETCUSD": "ETCUSD",
+    "ETCUSD": "ETCUSD",
+    
+    "FIL-USD": "FILUSD",
+    "X:FILUSD": "FILUSD",
+    "FILUSD": "FILUSD",
+    
+    "FLOW-USD": "FLOWUSD",
+    "X:FLOWUSD": "FLOWUSD",
+    "FLOWUSD": "FLOWUSD",
+    
+    "FTM-USD": "FTMUSD",
+    "X:FTMUSD": "FTMUSD",
+    "FTMUSD": "FTMUSD",
+    
+    "GMX-USD": "GMXUSD",
+    "X:GMXUSD": "GMXUSD",
+    "GMXUSD": "GMXUSD",
+    
+    "GRT-USD": "GRTUSD",
+    "X:GRTUSD": "GRTUSD",
+    "GRTUSD": "GRTUSD",
+    
+    "ICP-USD": "ICPUSD",
+    "X:ICPUSD": "ICPUSD",
+    "ICPUSD": "ICPUSD",
+    
+    "INJ-USD": "INJUSD",
+    "X:INJUSD": "INJUSD",
+    "INJUSD": "INJUSD",
+    
+    "JUP-USD": "JUPUSD",
+    "X:JUPUSD": "JUPUSD",
+    "JUPUSD": "JUPUSD",
+    
+    "KAS-USD": "KASUSD",
+    "X:KASUSD": "KASUSD",
+    "KASUSD": "KASUSD",
+    
+    "LDO-USD": "LDOUSD",
+    "X:LDOUSD": "LDOUSD",
+    "LDOUSD": "LDOUSD",
+    
+    "LINK-USD": "LINKUSD",
+    "X:LINKUSD": "LINKUSD",
+    "LINKUSD": "LINKUSD",
+    
+    "LTC-USD": "LTCUSD",
+    "X:LTCUSD": "LTCUSD",
+    "LTCUSD": "LTCUSD",
+    
+    "MANA-USD": "MANAUSD",
+    "X:MANAUSD": "MANAUSD",
+    "MANAUSD": "MANAUSD",
+    
+    "MATIC-USD": "MATICUSD",
+    "X:MATICUSD": "MATICUSD",
+    "MATICUSD": "MATICUSD",
+    
+    "MKR-USD": "MKRUSD",
+    "X:MKRUSD": "MKRUSD",
+    "MKRUSD": "MKRUSD",
+    
+    "NEAR-USD": "NEARUSD",
+    "X:NEARUSD": "NEARUSD",
+    "NEARUSD": "NEARUSD",
+    
+    "ONDO-USD": "ONDOUSD",
+    "X:ONDOUSD": "ONDOUSD",
+    "ONDOUSD": "ONDOUSD",
+    
+    "OP-USD": "OPUSD",
+    "X:OPUSD": "OPUSD",
+    "OPUSD": "OPUSD",
+    
+    "ORDI-USD": "ORDIUSD",
+    "X:ORDIUSD": "ORDIUSD",
+    "ORDIUSD": "ORDIUSD",
+    
+    "PEOPLE-USD": "PEOPLEUSD",
+    "X:PEOPLEUSD": "PEOPLEUSD",
+    "PEOPLEUSD": "PEOPLEUSD",
+    
+    "PEPE-USD": "PEPEUSD",
+    "X:PEPEUSD": "PEPEUSD",
+    "PEPEUSD": "PEPEUSD",
+    
+    "PYTH-USD": "PYTHUSD",
+    "X:PYTHUSD": "PYTHUSD",
+    "PYTHUSD": "PYTHUSD",
+    
+    "QNT-USD": "QNTUSD",
+    "X:QNTUSD": "QNTUSD",
+    "QNTUSD": "QNTUSD",
+    
+    "RNDR-USD": "RNDRUSD",
+    "X:RNDRUSD": "RNDRUSD",
+    "RNDRUSD": "RNDRUSD",
+    
+    "RUNE-USD": "RUNEUSD",
+    "X:RUNEUSD": "RUNEUSD",
+    "RUNEUSD": "RUNEUSD",
+    
+    "SAND-USD": "SANDUSD",
+    "X:SANDUSD": "SANDUSD",
+    "SANDUSD": "SANDUSD",
+    
+    "SEI-USD": "SEIUSD",
+    "X:SEIUSD": "SEIUSD",
+    "SEIUSD": "SEIUSD",
+    
+    "SHIB-USD": "SHIBUSD",
+    "X:SHIBUSD": "SHIBUSD",
+    "SHIBUSD": "SHIBUSD",
+    
+    "SNX-USD": "SNXUSD",
+    "X:SNXUSD": "SNXUSD",
+    "SNXUSD": "SNXUSD",
+    
+    "STRK-USD": "STRKUSD",
+    "X:STRKUSD": "STRKUSD",
+    "STRKUSD": "STRKUSD",
+    
+    "STX-USD": "STXUSD",
+    "X:STXUSD": "STXUSD",
+    "STXUSD": "STXUSD",
+    
+    "SUI-USD": "SUIUSD",
+    "X:SUIUSD": "SUIUSD",
+    "SUIUSD": "SUIUSD",
+    
+    "THETA-USD": "THETAUSD",
+    "X:THETAUSD": "THETAUSD",
+    "THETAUSD": "THETAUSD",
+    
+    "TIA-USD": "TIAUSD",
+    "X:TIAUSD": "TIAUSD",
+    "TIAUSD": "TIAUSD",
+    
+    "TON-USD": "TONUSD",
+    "X:TONUSD": "TONUSD",
+    "TONUSD": "TONUSD",
+    
+    "TRX-USD": "TRXUSD",
+    "X:TRXUSD": "TRXUSD",
+    "TRXUSD": "TRXUSD",
+    
+    "UNI-USD": "UNIUSD",
+    "X:UNIUSD": "UNIUSD",
+    "UNIUSD": "UNIUSD",
+    
+    "VET-USD": "VETUSD",
+    "X:VETUSD": "VETUSD",
+    "VETUSD": "VETUSD",
+    
+    "WIF-USD": "WIFUSD",
+    "X:WIFUSD": "WIFUSD",
+    "WIFUSD": "WIFUSD",
+    
+    "XLM-USD": "XLMUSD",
+    "X:XLMUSD": "XLMUSD",
+    "XLMUSD": "XLMUSD",
+    
+    # Forex (comprehensive mapping)
     "C:EURUSD": "EURUSD",
     "EUR-USD": "EURUSD",
     "EUR/USD": "EURUSD",
@@ -60,23 +290,202 @@ SYMBOL_MAP = {
     "NZD-USD": "NZDUSD",
     "NZD/USD": "NZDUSD",
     "NZDUSD": "NZDUSD",
+    
+    "C:AUDCAD": "AUDCAD",
+    "AUD-CAD": "AUDCAD",
+    "AUD/CAD": "AUDCAD",
+    "AUDCAD": "AUDCAD",
+    
+    "C:AUDJPY": "AUDJPY",
+    "AUD-JPY": "AUDJPY",
+    "AUD/JPY": "AUDJPY",
+    "AUDJPY": "AUDJPY",
+    
+    "C:AUDNZD": "AUDNZD",
+    "AUD-NZD": "AUDNZD",
+    "AUD/NZD": "AUDNZD",
+    "AUDNZD": "AUDNZD",
+    
+    "C:CADJPY": "CADJPY",
+    "CAD-JPY": "CADJPY",
+    "CAD/JPY": "CADJPY",
+    "CADJPY": "CADJPY",
+    
+    "C:CHFJPY": "CHFJPY",
+    "CHF-JPY": "CHFJPY",
+    "CHF/JPY": "CHFJPY",
+    "CHFJPY": "CHFJPY",
+    
+    "C:EURAUD": "EURAUD",
+    "EUR-AUD": "EURAUD",
+    "EUR/AUD": "EURAUD",
+    "EURAUD": "EURAUD",
+    
+    "C:EURCAD": "EURCAD",
+    "EUR-CAD": "EURCAD",
+    "EUR/CAD": "EURCAD",
+    "EURCAD": "EURCAD",
+    
+    "C:EURCHF": "EURCHF",
+    "EUR-CHF": "EURCHF",
+    "EUR/CHF": "EURCHF",
+    "EURCHF": "EURCHF",
+    
+    "C:EURGBP": "EURGBP",
+    "EUR-GBP": "EURGBP",
+    "EUR/GBP": "EURGBP",
+    "EURGBP": "EURGBP",
+    
+    "C:EURJPY": "EURJPY",
+    "EUR-JPY": "EURJPY",
+    "EUR/JPY": "EURJPY",
+    "EURJPY": "EURJPY",
+    
+    "C:EURNZD": "EURNZD",
+    "EUR-NZD": "EURNZD",
+    "EUR/NZD": "EURNZD",
+    "EURNZD": "EURNZD",
+    
+    "C:GBPAUD": "GBPAUD",
+    "GBP-AUD": "GBPAUD",
+    "GBP/AUD": "GBPAUD",
+    "GBPAUD": "GBPAUD",
+    
+    "C:GBPCAD": "GBPCAD",
+    "GBP-CAD": "GBPCAD",
+    "GBP/CAD": "GBPCAD",
+    "GBPCAD": "GBPCAD",
+    
+    "C:GBPCHF": "GBPCHF",
+    "GBP-CHF": "GBPCHF",
+    "GBP/CHF": "GBPCHF",
+    "GBPCHF": "GBPCHF",
+    
+    "C:GBPJPY": "GBPJPY",
+    "GBP-JPY": "GBPJPY",
+    "GBP/JPY": "GBPJPY",
+    "GBPJPY": "GBPJPY",
+    
+    "C:GBPNZD": "GBPNZD",
+    "GBP-NZD": "GBPNZD",
+    "GBP/NZD": "GBPNZD",
+    "GBPNZD": "GBPNZD",
+    
+    "C:NZDJPY": "NZDJPY",
+    "NZD-JPY": "NZDJPY",
+    "NZD/JPY": "NZDJPY",
+    "NZDJPY": "NZDJPY",
+    
+    "C:USDCHF": "USDCHF",
+    "USD-CHF": "USDCHF",
+    "USD/CHF": "USDCHF",
+    "USDCHF": "USDCHF",
 
-    # Equities / ETFs (internal → QC)
+    # Equities / ETFs (comprehensive mapping)
+    # Major Indices & ETFs
     "SPY": "SPY",
     "NYSE:SPY": "SPY",
     "ARCA:SPY": "SPY",
     "QQQ": "QQQ",
     "NASDAQ:QQQ": "QQQ",
+    "DIA": "DIA",
+    "IWM": "IWM",
+    "VIX": "VIX",
+    "DXY": "DXY",
+    "XLE": "XLE",
+    "XLF": "XLF",
+    "XLK": "XLK",
+    
+    # Tech Stocks
     "AAPL": "AAPL",
     "NASDAQ:AAPL": "AAPL",
     "MSFT": "MSFT",
     "NASDAQ:MSFT": "MSFT",
-    "TSLA": "TSLA",
-    "NASDAQ:TSLA": "TSLA",
     "NVDA": "NVDA",
     "NASDAQ:NVDA": "NVDA",
     "META": "META",
     "NASDAQ:META": "META",
+    "GOOGL": "GOOGL",
+    "NASDAQ:GOOGL": "GOOGL",
+    "AMZN": "AMZN",
+    "NASDAQ:AMZN": "AMZN",
+    "TSLA": "TSLA",
+    "NASDAQ:TSLA": "TSLA",
+    "NFLX": "NFLX",
+    "AMD": "AMD",
+    "INTC": "INTC",
+    "QCOM": "QCOM",
+    "ORCL": "ORCL",
+    "CRM": "CRM",
+    "ADBE": "ADBE",
+    "CSCO": "CSCO",
+    "ASML": "ASML",
+    "AVGO": "AVGO",
+    "TXN": "TXN",
+    "AMAT": "AMAT",
+    "MU": "MU",
+    "SHOP": "SHOP",
+    "SQ": "SQ",
+    "PYPL": "PYPL",
+    
+    # Finance
+    "JPM": "JPM",
+    "BAC": "BAC",
+    "WFC": "WFC",
+    "GS": "GS",
+    "MS": "MS",
+    "MA": "MA",
+    "V": "V",
+    
+    # Crypto-Related Stocks
+    "COIN": "COIN",
+    "MSTR": "MSTR",
+    "MARA": "MARA",
+    "RIOT": "RIOT",
+    
+    # Energy
+    "XOM": "XOM",
+    "CVX": "CVX",
+    "COP": "COP",
+    "SLB": "SLB",
+    "NEE": "NEE",
+    
+    # Healthcare/Pharma
+    "JNJ": "JNJ",
+    "UNH": "UNH",
+    "LLY": "LLY",
+    "PFE": "PFE",
+    "ABBV": "ABBV",
+    "MRK": "MRK",
+    
+    # Consumer
+    "WMT": "WMT",
+    "COST": "COST",
+    "HD": "HD",
+    "LOW": "LOW",
+    "MCD": "MCD",
+    "SBUX": "SBUX",
+    "NKE": "NKE",
+    "DIS": "DIS",
+    "KO": "KO",
+    "PEP": "PEP",
+    
+    # Industrial/Transportation
+    "BA": "BA",
+    "CAT": "CAT",
+    "GE": "GE",
+    "UPS": "UPS",
+    "FDX": "FDX",
+    "DAL": "DAL",
+    "UAL": "UAL",
+    "AAL": "AAL",
+    "GM": "GM",
+    "F": "F",
+    "NUE": "NUE",
+    
+    # Other
+    "NAVN": "NAVN",
+    "NVAN": "NVAN",
 }
 
 # Reverse map (QC → internal) - prefer first occurrence (canonical)
@@ -85,9 +494,61 @@ for internal, qc in SYMBOL_MAP.items():
     REVERSE_SYMBOL_MAP.setdefault(qc, internal)
 
 # Asset class detection
-CRYPTO_SYMBOLS = {"BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD"}
-FX_SYMBOLS = {"EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD", "USDCHF", "EURGBP", "EURJPY", "GBPJPY"}
-EQUITY_SYMBOLS = {"SPY", "QQQ", "AAPL", "MSFT", "TSLA", "NVDA", "META"}
+CRYPTO_SYMBOLS = {
+    # Major
+    "BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "BNBUSD",
+    # DeFi
+    "AAVEUSD", "UNIUSD", "LINKUSD", "SNXUSD", "GMXUSD", "MKRUSD", "DYDXUSD",
+    # Layer 1
+    "ADAUSD", "AVAXUSD", "DOTUSD", "ATOMUSD", "NEARUSD", "APTUSD", "SUIUSD", 
+    "ICPUSD", "ALGOUSD", "EOSUSD", "FILUSD", "FLOWUSD", "THETAUSD", "TIAUSD", "TONUSD",
+    # Layer 2
+    "MATICUSD", "OPUSD", "ARBUSD", "STRKUSD", "STXUSD",
+    # Alt Coins
+    "LTCUSD", "BCHUSD", "ETCUSD", "TRXUSD", "XLMUSD", "VETUSD",
+    # Meme/Social
+    "DOGUSD", "SHIBUSD", "BONKUSD", "PEPEUSD", "WIFUSD", "PEOPLEUSD",
+    # Gaming/NFT
+    "AXSUSD", "MANAUSD", "SANDUSD", "GRTUSD",
+    # Oracle/Infra
+    "PYTHUSD", "RNDRUSD", "QNTUSD", "INJUSD", "SEIUSD",
+    # Newer/Trending
+    "JUPUSD", "KASUSD", "LDOUSD", "ONDOUSD", "ORDIUSD", "RUNEUSD", "ARUSD",
+    "FTMUSD",
+}
+
+FX_SYMBOLS = {
+    # Majors
+    "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD", "USDCHF",
+    # Crosses
+    "EURGBP", "EURJPY", "GBPJPY", "EURAUD", "EURCAD", "EURCHF", "EURNZD",
+    "GBPAUD", "GBPCAD", "GBPCHF", "GBPNZD",
+    "AUDCAD", "AUDJPY", "AUDNZD",
+    "CADJPY", "CHFJPY", "NZDJPY",
+}
+
+EQUITY_SYMBOLS = {
+    # Indices/ETFs
+    "SPY", "QQQ", "DIA", "IWM", "VIX", "DXY", "XLE", "XLF", "XLK",
+    # Tech
+    "AAPL", "MSFT", "NVDA", "META", "GOOGL", "AMZN", "TSLA", "NFLX",
+    "AMD", "INTC", "QCOM", "ORCL", "CRM", "ADBE", "CSCO", "ASML", "AVGO",
+    "TXN", "AMAT", "MU", "SHOP", "SQ", "PYPL",
+    # Finance
+    "JPM", "BAC", "WFC", "GS", "MS", "MA", "V",
+    # Crypto Stocks
+    "COIN", "MSTR", "MARA", "RIOT",
+    # Energy
+    "XOM", "CVX", "COP", "SLB", "NEE",
+    # Healthcare
+    "JNJ", "UNH", "LLY", "PFE", "ABBV", "MRK",
+    # Consumer
+    "WMT", "COST", "HD", "LOW", "MCD", "SBUX", "NKE", "DIS", "KO", "PEP",
+    # Industrial
+    "BA", "CAT", "GE", "UPS", "FDX", "DAL", "UAL", "AAL", "GM", "F", "NUE",
+    # Other
+    "NAVN", "NVAN",
+}
 
 # Venue defaults
 DEFAULT_CRYPTO_VENUE = "GDAX"  # Coinbase Pro in QC

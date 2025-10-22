@@ -202,19 +202,22 @@ class MicrostructureAnalyzer:
         Analyze trade flow patterns and market microstructure.
 
         Args:
-            df: DataFrame with trade data
+            df: DataFrame with trade data or OHLCV data
 
         Returns:
             Series with trade flow metrics
         """
-        if 'volume' not in df.columns or 'price' not in df.columns:
-            logger.warning("Missing volume/price columns for trade flow analysis")
+        # Use 'close' if 'price' doesn't exist (OHLCV data)
+        price_col = 'price' if 'price' in df.columns else 'close'
+        
+        if 'volume' not in df.columns or price_col not in df.columns:
+            logger.debug("Missing volume/price columns for trade flow analysis (expected for OHLCV data)")
             return pd.Series(dtype=float)
 
         try:
             # Trade size analysis
             trade_sizes = df['volume']
-            price_changes = df['price'].pct_change()
+            price_changes = df[price_col].pct_change()
 
             # Large vs small trade analysis
             size_median = trade_sizes.median()
@@ -420,6 +423,16 @@ class QuotesBasedMicrostructureAnalyzer:
 
         # Overall data quality score (much higher with quotes)
         results['data_quality_score'] = 0.95  # 95% vs 80% for OHLCV
+        
+        # Generate summary for Pydantic validation
+        computed_features = sum(1 for k in ['bid_ask_spread', 'order_flow_imbalance', 'microprice', 'price_impact', 'liquidity'] 
+                               if results.get(k) and (not isinstance(results[k], dict) or results[k]))
+        results['summary'] = {
+            'features_computed': computed_features,
+            'data_quality_score': results['data_quality_score'],
+            'market_efficiency': efficiency if isinstance(efficiency, str) else 'unknown',
+            'liquidity_assessment': results.get('liquidity', {}).get('assessment', 'unknown') if isinstance(results.get('liquidity'), dict) else 'unknown'
+        }
 
         return results
 

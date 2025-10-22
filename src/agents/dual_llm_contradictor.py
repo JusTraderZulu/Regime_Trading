@@ -435,13 +435,19 @@ def dual_llm_contradictor_node(state: PipelineState) -> PipelineState:
                 logger.info(f"✓ Dual-LLM research saved: {artifact_path}")
                 
                 # Also save structured context items separately for easy access
+                # Extract from research_results instead of undefined variables
+                context_agent_data = research_results.get('context_agent', {})
+                context_items = context_agent_data.get('structured_items', [])
+                context_nudge = context_agent_data.get('context_nudge', 0.0)
+                
                 if context_items:
+                    from src.core.context_parser import categorize_and_score_items
                     context_artifact_path = Path(artifacts_dir) / 'analysis' / 'market_context.json'
                     context_data = {
                         'items': context_items,
                         'aggregate_nudge': context_nudge,
                         'by_category': categorize_and_score_items(context_items),
-                        'timestamp': context.get('timestamp')
+                        'timestamp': context_agent_data.get('timestamp')
                     }
                     with open(context_artifact_path, 'w') as f:
                         json.dump(context_data, f, indent=2, default=str)
