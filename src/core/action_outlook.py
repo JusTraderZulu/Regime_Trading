@@ -354,15 +354,17 @@ def build_action_outlook(state: Dict) -> Dict:
     stoch_mt = stochastic.by_tier.get('MT') if stochastic and hasattr(stochastic, 'by_tier') else None
     prob_up = stoch_mt.prob_up if stoch_mt else 0.5
     
-    # LLM validation
+    # LLM validation + Context nudge
     dual_llm = state.get('dual_llm_research', {})
     delta_llm = 0.0
+    context_nudge = 0.0
+    
     if dual_llm:
+        # Get verdict-based adjustment
         from scripts.portfolio_analyzer import _extract_llm_verdict
         context_verdict = _extract_llm_verdict(dual_llm.get('context_agent', {}).get('research', ''))
         analytical_verdict = _extract_llm_verdict(dual_llm.get('analytical_agent', {}).get('research', ''))
         
-        # Calculate LLM delta
         verdict_scores = {
             'STRONG_CONFIRM': 0.05,
             'WEAK_CONFIRM': 0.025,
@@ -370,10 +372,19 @@ def build_action_outlook(state: Dict) -> Dict:
             'WEAK_CONTRADICT': -0.025,
             'STRONG_CONTRADICT': -0.05,
         }
-        delta_llm = (
+        verdict_delta = (
             verdict_scores.get(context_verdict, 0.0) +
             verdict_scores.get(analytical_verdict, 0.0)
         ) / 2.0
+        
+        # Get structured context nudge (from parsed market events)
+        context_agent_data = dual_llm.get('context_agent', {})
+        context_nudge = context_agent_data.get('context_nudge', 0.0)
+        
+        # Combine: verdict + context nudge
+        delta_llm = verdict_delta + context_nudge
+        
+        logger.info(f"LLM adjustments: verdict={verdict_delta:+.3f}, context_nudge={context_nudge:+.3f}, total={delta_llm:+.3f}")
     
     # Calculate scores
     mt_conf_eff = regime_mt.confidence

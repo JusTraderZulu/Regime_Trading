@@ -49,10 +49,25 @@ class DualLLMResearchAgent:
         context_research = self._conduct_context_research(context)
         analytical_research = self._conduct_analytical_research(context)
 
+        # Parse structured context from Context Agent
+        from src.core.context_parser import parse_context_output, calculate_context_nudge, categorize_and_score_items
+        
+        context_items = []
+        context_narrative = context_research
+        context_nudge = 0.0
+        
+        if context_research:
+            context_items, context_narrative = parse_context_output(context_research)
+            context_nudge = calculate_context_nudge(context_items, cap=0.02)
+            logger.info(f"✓ Parsed {len(context_items)} context items, nudge: {context_nudge:+.3f}")
+        
         research_results = {
             'context_agent': {
                 'provider': self.context_provider,
-                'research': context_research,
+                'research': context_research,  # Full original
+                'narrative': context_narrative,  # Just narrative part
+                'structured_items': context_items,  # NEW: Parsed facts
+                'context_nudge': context_nudge,  # NEW: Aggregate impact
                 'timestamp': context.get('timestamp')
             },
             'analytical_agent': {
@@ -223,34 +238,53 @@ Statistical Signals:
 {transition_section}{forecast_section}
 === YOUR MISSION ===
 
-Provide CONCISE market intelligence that **CONFIRMS or CONTRADICTS** the quantitative analysis:
+Provide TWO outputs:
 
-1. **Sentiment Validation** (last 48h):
-   - Does market sentiment/news SUPPORT the "{context['primary_regime']}" classification?
-   - Recent events that CONFIRM or CONTRADICT this regime?
-   - Are traders behaving as if market is {context['primary_regime']}?
+**OUTPUT 1: STRUCTURED FACTS (for quantitative integration)**
+Extract 3-7 key market developments from last 24-48h, categorized as:
+- Regulatory (SEC, policy, legal)
+- Macro (GDP, inflation, Fed, rates)
+- ETF/Flows (inflows, outflows, institutional)
+- Derivatives (options, futures, funding)
+- On-chain (only for crypto: whale moves, exchange flows)
+- Tech/Protocol (only for crypto: upgrades, partnerships)
+- Corporate (earnings, guidance, M&A)
 
-2. **Price Action Reality Check**:
-   - Do current price patterns align with {context['primary_regime']} behavior?
-   - Support/resistance levels consistent with forecast range?
-   - Volume/orderflow confirming or denying the regime?
+For each item:
+- Event description (one sentence, with numbers)
+- Category
+- Impact: Bullish (+1 to +5), Bearish (-5 to -1), or Neutral (0)
+- Source/Date if available
 
-3. **Institutional Positioning**:
-   - Options flow/unusual activity suggesting different regime?
-   - Large players positioning for {context['primary_regime']} or against it?
-   - Any divergence between "smart money" and regime signal?
+Start with: "STRUCTURED_CONTEXT:"
+Format as bullets: "- [Category] Event (Impact: +3, Source: ...)"
 
-4. **Regime Invalidation Risks**:
-   - What news/event would FLIP the regime in next few bars?
-   - Upcoming catalysts that could break current pattern?
-   - Sentiment extremes suggesting regime about to change?
+**OUTPUT 2: NARRATIVE ANALYSIS (for human report)**
+After structured section, provide your normal narrative analysis:
 
-5. **Bottom Line - AGREE or DISAGREE**:
-   - Rate confidence in regime: STRONG CONFIRM / WEAK CONFIRM / NEUTRAL / WEAK CONTRADICT / STRONG CONTRADICT
-   - If disagreeing: What regime does market context suggest instead?
-   - Top 2 reasons for your assessment
+1. Sentiment Validation
+2. Price Action Reality Check  
+3. Institutional Positioning
+4. Regime Invalidation Risks
+5. **Bottom Line:** STRONG CONFIRM / WEAK CONFIRM / NEUTRAL / WEAK CONTRADICT / STRONG CONTRADICT
 
-Format: Short bullets, DATA not opinions, SPECIFIC not vague.
+Start narrative with: "NARRATIVE:"
+
+Example format:
+```
+STRUCTURED_CONTEXT:
+- [Regulatory] SEC approved spot Bitcoin ETF with $2B day-1 inflow (Impact: +4, Source: SEC.gov, Oct 20)
+- [ETF/Flows] IBIT saw $500M outflow on Oct 21 (Impact: -2, Source: Bloomberg)
+- [Macro] Fed holds rates, signals pause (Impact: +1, Source: FOMC, Oct 22)
+
+NARRATIVE:
+Market sentiment for BTC is cautiously bullish despite mixed flows...
+[rest of your normal analysis]
+
+Bottom Line: WEAK CONFIRM
+```
+
+Be factual, cite sources, quantify impact.
 """
 
     def _build_analytical_prompt(self, context: Dict[str, Any]) -> str:
@@ -399,6 +433,20 @@ def dual_llm_contradictor_node(state: PipelineState) -> PipelineState:
                 with open(artifact_path, 'w') as f:
                     json.dump(research_results, f, indent=2, default=str)
                 logger.info(f"✓ Dual-LLM research saved: {artifact_path}")
+                
+                # Also save structured context items separately for easy access
+                if context_items:
+                    context_artifact_path = Path(artifacts_dir) / 'analysis' / 'market_context.json'
+                    context_data = {
+                        'items': context_items,
+                        'aggregate_nudge': context_nudge,
+                        'by_category': categorize_and_score_items(context_items),
+                        'timestamp': context.get('timestamp')
+                    }
+                    with open(context_artifact_path, 'w') as f:
+                        json.dump(context_data, f, indent=2, default=str)
+                    logger.info(f"✓ Market context saved: {context_artifact_path}")
+                    
             except Exception as e:
                 logger.warning(f"Failed to save dual-LLM research artifact: {e}")
 
