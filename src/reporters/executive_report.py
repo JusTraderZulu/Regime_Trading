@@ -14,6 +14,44 @@ from src.reporters.index_generator import generate_index_file
 logger = logging.getLogger(__name__)
 
 
+def _create_run_manifest(state: PipelineState, artifacts_dir: Path) -> None:
+    """Create manifest.json with run overview."""
+    regime_mt = state.get('regime_mt')
+    action_outlook = state.get('action_outlook', {})
+    
+    manifest = {
+        'run_metadata': {
+            'symbol': state.get('symbol'),
+            'timestamp': state.get('timestamp').isoformat() if state.get('timestamp') else None,
+            'run_mode': state.get('run_mode'),
+            'schema_version': '1.2'
+        },
+        'regime_summary': {
+            'primary': regime_mt.label.value if regime_mt else None,
+            'confidence': regime_mt.confidence if regime_mt else None,
+        },
+        'action_outlook_summary': {
+            'bias': action_outlook.get('bias'),
+            'conviction': action_outlook.get('conviction_score'),
+            'stability': action_outlook.get('stability_score'),
+            'tactical_mode': action_outlook.get('tactical_mode'),
+            'sizing_pct': action_outlook.get('positioning', {}).get('sizing_x_max', 0) * 100
+        } if action_outlook else None,
+        'files': {
+            'main_report': 'report.md',
+            'quick_summary': 'INDEX.md',
+            'action_plan': 'action_outlook.json',
+            'regime_data': 'regime/',
+            'features_data': 'features/',
+            'analysis_outputs': 'analysis/',
+            'execution_data': 'execution/',
+            'transition_metrics': 'metrics/'
+        }
+    }
+    
+    save_json(manifest, artifacts_dir / "manifest.json")
+
+
 def generate_report_node(state: PipelineState) -> Dict:
     """
     LangGraph node (optional): Write full report to disk.
@@ -56,61 +94,74 @@ def generate_report_node(state: PipelineState) -> Dict:
 
 
 def _save_artifacts(state: PipelineState, artifacts_dir: Path) -> None:
-    """Save all intermediate outputs as JSON artifacts"""
+    """Save all intermediate outputs as JSON artifacts in organized subdirectories"""
 
-    # Features
+    # Create subdirectories
+    regime_dir = artifacts_dir / "regime"
+    features_dir = artifacts_dir / "features"
+    analysis_dir = artifacts_dir / "analysis"
+    execution_dir = artifacts_dir / "execution"
+    metrics_dir = artifacts_dir / "metrics"
+    
+    regime_dir.mkdir(exist_ok=True)
+    features_dir.mkdir(exist_ok=True)
+    analysis_dir.mkdir(exist_ok=True)
+    execution_dir.mkdir(exist_ok=True)
+    metrics_dir.mkdir(exist_ok=True)
+
+    # Features → features/
     for tier in ["lt", "mt", "st", "us"]:
         features = state.get(f"features_{tier}")
         if features:
             save_json(
                 features.model_dump(),
-                artifacts_dir / f"features_{tier}.json",
+                features_dir / f"features_{tier}.json",
             )
 
-    # CCM
+    # CCM → analysis/
     for tier in ["lt", "mt", "st"]:
         ccm = state.get(f"ccm_{tier}")
         if ccm:
             save_json(
                 ccm.model_dump(),
-                artifacts_dir / f"ccm_{tier}.json",
+                analysis_dir / f"ccm_{tier}.json",
             )
 
-    # Regime
+    # Regime → regime/
     for tier in ["lt", "mt", "st", "us"]:
         regime = state.get(f"regime_{tier}")
         if regime:
             save_json(
                 regime.model_dump(),
-                artifacts_dir / f"regime_{tier}.json",
+                regime_dir / f"regime_{tier}.json",
             )
 
-    # Backtest
+    # Backtest → analysis/
     for tier in ["lt", "mt", "st"]:
         backtest = state.get(f"backtest_{tier}")
         if backtest:
             save_json(
                 backtest.model_dump(),
-                artifacts_dir / f"backtest_{tier}.json",
+                analysis_dir / f"backtest_{tier}.json",
             )
 
-    # Contradictor
+    # Contradictor → analysis/
     contradictor = state.get("contradictor_st")
     if contradictor:
         save_json(
             contradictor.model_dump(),
-            artifacts_dir / "contradictor_st.json",
+            analysis_dir / "contradictor_st.json",
         )
     
-    # QuantConnect Results
+    # QuantConnect Results → analysis/
     qc_result = state.get("qc_backtest_result")
     if qc_result:
         save_json(
             qc_result.model_dump() if hasattr(qc_result, 'model_dump') else qc_result.__dict__,
-            artifacts_dir / "qc_backtest_result.json",
+            analysis_dir / "qc_backtest_result.json",
         )
     
-    # Strategy Comparison (all tested strategies)
+    # Strategy Comparison → analysis/
     strategy_comparison = state.get("strategy_comparison_mt")
     if strategy_comparison:
         comparison_data = {
@@ -118,47 +169,56 @@ def _save_artifacts(state: PipelineState, artifacts_dir: Path) -> None:
         }
         save_json(
             comparison_data,
-            artifacts_dir / "strategy_comparison.json",
+            analysis_dir / "strategy_comparison.json",
         )
 
-    # Judge
+    # Judge → analysis/
     judge_report = state.get("judge_report")
     if judge_report:
         save_json(
             judge_report.model_dump(),
-            artifacts_dir / "judge_report.json",
+            analysis_dir / "judge_report.json",
         )
 
+    # Stochastic → analysis/
     stochastic = state.get("stochastic")
     if stochastic:
         save_json(
             stochastic.model_dump(),
-            artifacts_dir / "stochastic_outlook.json",
+            analysis_dir / "stochastic_outlook.json",
         )
+    
+    # Dual-LLM research → analysis/ (saved by dual_llm_contradictor_node)
 
-    # Exec report
+    # Exec report → execution/
     if state.get("exec_report"):
         save_json(
             state["exec_report"].model_dump(),
-            artifacts_dir / "exec_report.json",
+            execution_dir / "exec_report.json",
         )
     
-    # Transition metrics (combined by tier) if present
+    # Trading signal summary → execution/
+    trading_signal_path = artifacts_dir / "trading_signal_summary.yaml"
+    if trading_signal_path.exists():
+        import shutil
+        shutil.move(str(trading_signal_path), str(execution_dir / "trading_signal_summary.yaml"))
+    
+    # Transition metrics → metrics/ (combined file only, no snapshots)
     tm_state = state.get("transition_metrics")
     if tm_state:
-        metrics_path = artifacts_dir / "metrics"
-        metrics_path.mkdir(parents=True, exist_ok=True)
-        save_json(tm_state, metrics_path / "transition_metrics.json")
+        save_json(tm_state, metrics_dir / "transition_metrics.json")
     
-    # Action-outlook (v1.2 positioning framework) if present
+    # Action-outlook → ROOT (key file for execution)
+    # Note: Created by summarizer, so may not exist if called before summarizer runs
     action_outlook = state.get("action_outlook")
     if action_outlook:
         save_json(
             action_outlook,
             artifacts_dir / "action_outlook.json",
         )
+        logger.info("  ✓ Action-outlook saved")
     
-    # Strategy comparison
+    # Strategy comparison → analysis/
     strategy_comparison = state.get("strategy_comparison_st")
     if strategy_comparison:
         comparison_data = {
@@ -167,10 +227,18 @@ def _save_artifacts(state: PipelineState, artifacts_dir: Path) -> None:
         }
         save_json(
             comparison_data,
-            artifacts_dir / "strategy_comparison_st.json",
+            analysis_dir / "strategy_comparison_st.json",
         )
+    
+    # Create manifest at root
+    _create_run_manifest(state, artifacts_dir)
 
     logger.info(f"Artifacts saved to {artifacts_dir}")
+    logger.info(f"  Regime: {len(list(regime_dir.glob('*.json')))} files")
+    logger.info(f"  Features: {len(list(features_dir.glob('*.json')))} files")
+    logger.info(f"  Analysis: {len(list(analysis_dir.glob('*.json')))} files")
+    logger.info(f"  Execution: {len(list(execution_dir.glob('*')))} files")
+    logger.info(f"  Metrics: {len(list(metrics_dir.glob('*.json')))} files")
 
 
 def write_report_to_disk(state: PipelineState) -> str:

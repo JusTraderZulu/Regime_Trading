@@ -875,41 +875,16 @@ def detect_regime_node(state: PipelineState) -> Dict:
                             tm_state[tier_str] = snap.model_dump()
                             state["transition_metrics"] = tm_state
 
-                        # Optional: persist snapshots under current run artifacts
-                        if tm_cfg.get("persist", True):
-                            artifacts_dir = state.get("artifacts_dir")
-                            if artifacts_dir:
-                                metrics_dir = Path(artifacts_dir) / metrics_dir_name
-                                for w in tm_windows or [len(ensemble_seq)]:
-                                    trk = trackers.get((int(w), tier_str)) if trackers else None
-                                    if trk:
-                                        snapw = trk.snapshot(tier_str, sigma_ratio=sigma_ratio)
-                                        save_json(snapw.model_dump(), metrics_dir / f"snap_{tier_str}_{int(w)}.json")
+                        # Note: Individual snapshots no longer saved (only combined transition_metrics.json)
+                        # This reduces clutter from 16 files to 1 combined file
                 except Exception as tm_exc:
                     logger.warning(f"Transition metrics skipped for {tier_str}: {tm_exc}", exc_info=True)
         except Exception as e:
             logger.error(f"Failed to detect regime for {tier_str}: {e}")
             results[f"regime_{tier_key}"] = None
 
-    # Final snapshot: save combined transition_metrics from state (already computed with correct sigma)
-    if tm_enabled and tm_cfg.get("persist", True):
-        try:
-            artifacts_dir = state.get("artifacts_dir")
-            tm_state_final = state.get("transition_metrics")
-            if artifacts_dir and tm_state_final:
-                metrics_dir = Path(artifacts_dir) / metrics_dir_name
-                # Save the correctly-computed state metrics (includes sigma_ratio)
-                save_json(tm_state_final, metrics_dir / "transition_metrics.json")
-                # Also save individual tier snapshots from state for backward compatibility
-                for tier_str in active_tiers:
-                    tier_snap = tm_state_final.get(tier_str)
-                    if tier_snap:
-                        # Save with the tier's configured window size
-                        tier_window = window_bars_map.get(tier_str) if isinstance(window_bars_map, dict) else None
-                        if tier_window:
-                            save_json(tier_snap, metrics_dir / f"snap_{tier_str}_{int(tier_window)}.json")
-        except Exception as tm_exc:
-            logger.debug(f"Final transition snapshot skipped: {tm_exc}")
+    # Final transition metrics saved by executive_report.py (in organized metrics/ directory)
+    # No snapshots needed - only combined transition_metrics.json
 
     _enforce_multi_timeframe_alignment(results, config)
 

@@ -393,7 +393,8 @@ def dual_llm_contradictor_node(state: PipelineState) -> PipelineState:
             import json
             from pathlib import Path
 
-            artifact_path = Path(artifacts_dir) / 'dual_llm_research.json'
+            artifact_path = Path(artifacts_dir) / 'analysis' / 'dual_llm_research.json'
+            artifact_path.parent.mkdir(parents=True, exist_ok=True)
             try:
                 with open(artifact_path, 'w') as f:
                     json.dump(research_results, f, indent=2, default=str)

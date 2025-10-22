@@ -1237,9 +1237,16 @@ def summarizer_node(state: PipelineState) -> dict:
         backtest_max_dd=backtest_st.max_drawdown if backtest_st else (backtest_mt.max_drawdown if backtest_mt else None),
     )
     
-    # Store action_outlook in state for signals export
+    # Store action_outlook in state for signals export and save to artifacts
     if action_outlook:
         state['action_outlook'] = action_outlook
+        # Save immediately to ensure it's in artifacts
+        artifacts_dir = state.get('artifacts_dir')
+        if artifacts_dir:
+            from pathlib import Path
+            from src.core.utils import save_json
+            save_json(action_outlook, Path(artifacts_dir) / "action_outlook.json")
+            logger.info("  ✓ Action-outlook saved to artifacts")
 
     logger.info(f"Summarizer: Report generated ({len(summary_md)} chars)")
     logger.info(f"Primary execution: MT regime={mt_regime.value}, strategy={primary_strategy_name}")
