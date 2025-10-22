@@ -1040,6 +1040,21 @@ def summarizer_node(state: PipelineState) -> dict:
                         continue
             if len(rows) > 3:
                 summary_md += "\n\n" + "\n".join(rows) + "\n"
+
+            # Append shadow adaptive suggestions if present
+            rows2 = ["", "### Adaptive Hysteresis Suggestions (shadow)", "Tier | Suggest m_bars | Enter | Exit | Rationale", "---- | ------------- | ----- | ---- | ---------"]
+            found_suggest = False
+            for tier_name in ["LT","MT","ST","US"]:
+                suggests = sorted(metrics_dir.glob(f"suggest_{tier_name}_*.json"))
+                if suggests:
+                    try:
+                        js = json.loads(suggests[0].read_text())
+                        rows2.append(f"{tier_name} | {js.get('suggest_m_bars','-')} | {js.get('suggest_enter','-'):.2f} | {js.get('suggest_exit','-'):.2f} | {js.get('rationale','')}")
+                        found_suggest = True
+                    except Exception:
+                        continue
+            if found_suggest:
+                summary_md += "\n" + "\n".join(rows2) + "\n"
     except Exception as exc:
         logger.debug(f"Transition metrics section skipped: {exc}")
 

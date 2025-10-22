@@ -743,7 +743,7 @@ def detect_regime_node(state: PipelineState) -> Dict:
                 f"Regime {tier_str}: {regime.label.value} (confidence={regime.confidence:.2f})"
             )
 
-            # Stage 1: read-only transition telemetry (no behavior change)
+            # Stage 1/2: read-only transition telemetry (no behavior change)
             if tm_enabled:
                 try:
                     label_value = regime.label.value
@@ -762,6 +762,34 @@ def detect_regime_node(state: PipelineState) -> Dict:
                                 if trk:
                                     snap = trk.snapshot(tier_str)
                                     save_json(snap.model_dump(), metrics_dir / f"snap_{tier_str}_{int(w)}.json")
+
+                    # Stage 2: compute adaptive suggestions in shadow mode (log + persist only)
+                    features_cfg = config.get("features", {}) if isinstance(config, dict) else {}
+                    adaptive_cfg = features_cfg.get("adaptive_hysteresis", {}) if isinstance(features_cfg, dict) else {}
+                    if adaptive_cfg.get("shadow_mode", True):
+                        # Use smallest window stats as the basis
+                        if tm_windows:
+                            w0 = int(sorted(tm_windows)[0])
+                            trk0 = trackers.get((w0, tier_str)) if trackers else None
+                            if trk0:
+                                snap0 = trk0.snapshot(tier_str)
+                                base_gates = regime.gates
+                                base_m = getattr(base_gates, "m_bars", None) if base_gates else None
+                                base_enter = getattr(base_gates, "enter", None) if base_gates else None
+                                base_exit = getattr(base_gates, "exit", None) if base_gates else None
+                                if base_m is not None and base_enter is not None and base_exit is not None:
+                                    s = suggest_hysteresis(
+                                        stats=snap0,
+                                        base_m_bars=int(base_m),
+                                        base_enter=float(base_enter),
+                                        base_exit=float(base_exit),
+                                        clamps=adaptive_cfg.get("clamps", {}),
+                                        formulas=adaptive_cfg.get("formulas", {}),
+                                        tier=tier_str,
+                                    )
+                                    logger.info(f"[ADAPTIVE_HINT][{tier_str}] {s.rationale} → m_bars={s.suggest_m_bars}, enter={s.suggest_enter:.2f}, exit={s.suggest_exit:.2f}")
+                                    if tm_cfg.get("persist", True) and artifacts_dir:
+                                        save_json(s.model_dump(), metrics_dir / f"suggest_{tier_str}_{w0}.json")
                 except Exception as tm_exc:
                     logger.debug(f"Transition metrics skipped for {tier_str}: {tm_exc}")
         except Exception as e:
