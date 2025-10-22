@@ -27,6 +27,10 @@ from src.core.schemas import (
 from src.core.state import PipelineState
 from src.core.stochastic import infer_dt_from_bar, run_stochastic_forecast
 from src.core.utils import create_artifacts_dir
+from src.core.transition.tracker import TransitionTracker
+from src.core.transition.stats import suggest_hysteresis
+from src.core.transition.schema import AdaptiveSuggestion
+from src.core.utils import save_json
 from src.core.progress import track_node
 from src.bridges.symbol_map import parse_symbol_info
 from src.tools.backtest import backtest, walk_forward_analysis, test_multiple_strategies
@@ -666,6 +670,20 @@ def detect_regime_node(state: PipelineState) -> Dict:
 
     active_tiers = _active_tiers(config)
 
+    # Initialize trackers per (window,tier) once per run
+    features_cfg = config.get("features", {})
+    tm_cfg = features_cfg.get("transition_metrics", {})
+    tm_enabled = bool(tm_cfg.get("enabled", False))
+    tm_windows = tm_cfg.get("windows", {}).get("bars", []) if isinstance(tm_cfg.get("windows", {}), dict) else []
+    tm_tiers = tm_cfg.get("windows", {}).get("tiers", []) if isinstance(tm_cfg.get("windows", {}), dict) else []
+    metrics_dir_name = tm_cfg.get("files", {}).get("dir", "metrics")
+
+    # Create trackers cache on state
+    trackers = state.get("_transition_trackers") if tm_enabled else None
+    if tm_enabled and trackers is None:
+        trackers = {(int(w), t): TransitionTracker(int(w)) for w in tm_windows for t in (tm_tiers or active_tiers)}
+        state["_transition_trackers"] = trackers
+
     for tier_str in active_tiers:
         tier = Tier(tier_str)
         tier_key = tier_str.lower()
@@ -719,6 +737,28 @@ def detect_regime_node(state: PipelineState) -> Dict:
                         }
                     )
             results[f"regime_{tier_key}"] = regime
+
+            # Stage 1: read-only transition telemetry (no behavior change)
+            if tm_enabled:
+                try:
+                    label_value = regime.label.value
+                    idx_monotonic = len(state.get(f"data_{tier_key}") or [])  # simple monotonic index proxy
+                    for w in tm_windows:
+                        trk = trackers.get((int(w), tier_str)) if trackers else None
+                        if trk:
+                            trk.ingest(label_value, idx_monotonic)
+                    # Periodically persist snapshots under current run artifacts
+                    if tm_cfg.get("persist", True) and (idx_monotonic % 20 == 0):
+                        artifacts_dir = state.get("artifacts_dir")
+                        if artifacts_dir:
+                            metrics_dir = Path(artifacts_dir) / metrics_dir_name
+                            for w in tm_windows:
+                                trk = trackers.get((int(w), tier_str))
+                                if trk:
+                                    snap = trk.snapshot(tier_str)
+                                    save_json(snap.model_dump(), metrics_dir / f"snap_{tier_str}_{int(w)}.json")
+                except Exception as tm_exc:
+                    logger.debug(f"Transition metrics skipped for {tier_str}: {tm_exc}")
             logger.info(
                 f"Regime {tier_str}: {regime.label.value} (confidence={regime.confidence:.2f})"
             )

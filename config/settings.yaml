@@ -417,6 +417,31 @@ report:
   chart_height: 320       # pixels
   sandbox_web_summary: true  # Label Perplexity as "Non-Model"
 
+# Feature flags for transition telemetry and adaptive hysteresis
+features:
+  transition_metrics:
+    enabled: true
+    persist: true
+    backfill_on_boot: false
+    windows:
+      bars: [1000, 3000]
+      tiers: ["LT","MT","ST","US"]
+    files:
+      dir: "metrics"  # stored under each run's artifacts dir
+
+  adaptive_hysteresis:
+    enabled: false
+    shadow_mode: true
+    clamps:
+      m_bars_min: 2
+      m_bars_max: 8
+      enter_pp_max: 0.03
+      exit_pp_max: 0.03
+    formulas:
+      m_bars_factor: 0.25
+      enter_pp_per_z: 0.01
+      exit_pp_per_z: 0.01
+
 # Risk Management
 risk:
   confidence_bands: [0.50, 0.75]  # Map to position sizing
