@@ -309,7 +309,7 @@ def hurst_dfa(returns: np.ndarray, min_window: int = 16, max_window: int = 512, 
             fluctuations.append((window, np.mean(f_window)))
 
     if len(fluctuations) < 2:
-        logger.warning("Not enough windows for Hurst DFA estimation")
+        logger.debug(f"Not enough windows for Hurst DFA estimation (need 2+, got {len(fluctuations)}) - using R/S fallback")
         return 0.5
 
     # Power law: F(n) ~ n^alpha, where alpha ≈ H

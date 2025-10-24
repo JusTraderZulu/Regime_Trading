@@ -62,7 +62,7 @@ def microstructure_agent_node(state: PipelineState) -> PipelineState:
             # Check if we have sufficient data for microstructure analysis
             min_bars = mi_config.get('data', {}).get('min_tick_bars', 100)
             if len(df) < min_bars:
-                logger.warning(f"Insufficient data for tier {tier}: {len(df)} < {min_bars} bars")
+                logger.debug(f"Insufficient data for tier {tier}: {len(df)} < {min_bars} bars (expected for equities with limited intraday data)")
                 continue
 
             logger.info(f"Computing microstructure features for tier {tier} ({len(df)} bars)")

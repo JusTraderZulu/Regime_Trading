@@ -61,8 +61,8 @@ timeframes:
     min_samples: 400
   ST:  # Short-term / Execution
     bar: "15m"
-    lookback: 90    # 30-90 days for high-frequency features
-    min_samples: 300
+    lookback: 90    # 30-90 days for high-frequency features (crypto); equities get ~3 days from Alpaca
+    min_samples: 50  # Lowered from 300 to work with limited equity intraday data
   US:  # Ultra-short / Gate alignment
     bar: "5m"
     lookback: 30    # 10-30 days for gate confirmation

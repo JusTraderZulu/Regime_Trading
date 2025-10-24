@@ -829,7 +829,12 @@ def detect_regime_node(state: PipelineState) -> Dict:
 
                     df = state.get(f"data_{tier_key}")
                     if df is not None and hasattr(df, "tail") and tier_window:
-                        df_win = df.tail(tier_window)
+                        # Use min of requested window and available data
+                        actual_window = min(tier_window, len(df))
+                        if actual_window < 50:
+                            logger.debug(f"Skipping transition metrics for {tier_str}: only {actual_window} bars available")
+                            continue
+                        df_win = df.tail(actual_window)
                         # Prefer native per-model labels if present on state (future extension)
                         labels_by_model = {}
                         # Fallback: heuristic models
