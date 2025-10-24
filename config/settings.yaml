@@ -61,8 +61,8 @@ timeframes:
     min_samples: 400
   ST:  # Short-term / Execution
     bar: "15m"
-    lookback: 90    # 30-90 days for high-frequency features (crypto); equities get ~3 days from Alpaca
-    min_samples: 50  # Lowered from 300 to work with limited equity intraday data
+    lookback: 90    # Crypto/Forex get full 90 days; Equities limited to ~3 days (API restriction)
+    min_samples: 50  # Lowered from 300 to work with limited equity intraday data (~80-250 bars)
   US:  # Ultra-short / Gate alignment
     bar: "5m"
     lookback: 30    # 10-30 days for gate confirmation
@@ -179,10 +179,8 @@ equities:
   include_postmarket: false
   tz: "America/New_York"
   adjustment: "all"
-  # Data source selection (Polygon for intraday, Alpaca for daily)
-  data_source:
-    intraday: "polygon"  # Use Polygon for 15m, 4h (better historical depth)
-    daily: "alpaca"      # Use Alpaca for 1d (works fine)
+  # Data source: Use Alpaca (Polygon limits equity intraday to 3 days regardless of subscription)
+  # Note: Both Alpaca and Polygon give ~3 days of equity intraday, Alpaca is free
   timeframes:
     MT:
       bar: "1h"
