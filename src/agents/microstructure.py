@@ -137,16 +137,17 @@ def microstructure_agent_node(state: PipelineState) -> PipelineState:
                     symbol=state.get('symbol', 'UNKNOWN'),
                     tier=tier_enum,
                     timestamp=datetime.now(),
+                    n_samples=0,
                     bid_ask_spread=None,
                     order_flow_imbalance=None,
                     microprice=None,
                     price_impact=None,
                     trade_flow=None,
                     summary=MicrostructureSummary(
+                        features_computed=0,
                         data_quality_score=0.0,
                         market_efficiency='unknown',
-                        liquidity_assessment='unknown',
-                        analysis_timestamp=datetime.now()
+                        liquidity_assessment='unknown'
                     )
                 )
 

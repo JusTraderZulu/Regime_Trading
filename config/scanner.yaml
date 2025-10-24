@@ -19,8 +19,8 @@ data:
     - "4h"    # Medium-term momentum
     - "15m"   # Intraday setup
   lookback_bars: 100  # Per timeframe
-  concurrent_requests: 15  # Async batch size
-  retry_attempts: 2
+  concurrent_requests: 5  # Async batch size (reduced from 15 to avoid connection pool saturation)
+  retry_attempts: 3  # Increased retries for reliability
 
 # Metric computation
 metrics:
@@ -76,7 +76,7 @@ scoring:
 # Output filtering
 output:
   max_candidates_per_class: 10  # Top N per asset class
-  min_score: 30.0                # Minimum score to include (lowered from 40)
+  min_score: 20.0                # Minimum score to include (lowered from 30 for equities)
   save_dir: "artifacts/scanner"
   
   # What to include in report

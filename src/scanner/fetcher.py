@@ -55,7 +55,7 @@ def fetch_bars_for_scanner(
                 
                 # Fetch data
                 if asset_class == 'EQUITY':
-                    df = get_alpaca_bars(symbol, tf, lookback_days=lookback_days)
+                    df, meta = get_alpaca_bars(symbol, tf, lookback_days=lookback_days)
                 else:
                     df = get_polygon_bars(symbol, tf, lookback_days=lookback_days)
                 
