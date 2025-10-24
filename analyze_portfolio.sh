@@ -28,6 +28,8 @@ FOREX_PAIRS=("C:EURUSD" "C:GBPUSD" "EUR-USD" "GBP-USD")
 
 MODE="fast"
 SYMBOLS=()
+SCANNER_FILE=""
+TOP_N=10  # Default number of symbols to take from scanner
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -51,6 +53,16 @@ while [[ $# -gt 0 ]]; do
                 shift
             done
             ;;
+        --from-scanner)
+            shift
+            SCANNER_FILE="$1"
+            shift
+            ;;
+        --top)
+            shift
+            TOP_N="$1"
+            shift
+            ;;
         --help|-h)
             echo -e "${CYAN}Portfolio Analyzer - Multi-Asset Trading Analysis${NC}"
             echo ""
@@ -63,12 +75,16 @@ while [[ $# -gt 0 ]]; do
             echo "  --forex           Analyze major forex pairs"
             echo "  --thorough        Use thorough mode (includes backtesting, ~5-10 min)"
             echo "  --custom SYM1 SYM2...  Analyze custom symbols"
+            echo "  --from-scanner FILE    Load top candidates from scanner output JSON"
+            echo "  --top N           Number of top symbols to take from scanner (default: 10)"
             echo "  --help, -h        Show this help message"
             echo ""
             echo "Examples:"
             echo "  ./analyze_portfolio.sh"
             echo "  ./analyze_portfolio.sh --top5 --thorough"
             echo "  ./analyze_portfolio.sh --custom X:BTCUSD X:ETHUSD X:LINKUSD"
+            echo "  ./analyze_portfolio.sh --from-scanner artifacts/scanner/latest/scanner_output.json"
+            echo "  ./analyze_portfolio.sh --from-scanner artifacts/scanner/latest/scanner_output.json --top 15"
             echo "  ./analyze_portfolio.sh --forex"
             echo ""
             exit 0
@@ -80,6 +96,52 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Extract symbols from scanner output if specified
+if [ -n "$SCANNER_FILE" ]; then
+    if [ ! -f "$SCANNER_FILE" ]; then
+        echo -e "${RED}Error: Scanner file not found: $SCANNER_FILE${NC}"
+        exit 1
+    fi
+    
+    echo -e "${CYAN}📊 Loading scanner results from: $SCANNER_FILE${NC}"
+    
+    # Use Python to extract top N symbols from JSON
+    SYMBOLS=($(python3 -c "
+import json
+import sys
+
+try:
+    with open('$SCANNER_FILE') as f:
+        data = json.load(f)
+    
+    # Try all_candidates first, then aggregate by_class
+    candidates = data.get('all_candidates', [])
+    if not candidates:
+        by_class = data.get('by_class', {})
+        candidates = (
+            by_class.get('crypto', []) +
+            by_class.get('equities', []) +
+            by_class.get('forex', [])
+        )
+    
+    # Sort by score (descending) and take top N
+    candidates.sort(key=lambda x: x.get('score', 0), reverse=True)
+    top_symbols = [c['symbol'] for c in candidates[:$TOP_N]]
+    print(' '.join(top_symbols))
+except Exception as e:
+    print(f'Error reading scanner file: {e}', file=sys.stderr)
+    sys.exit(1)
+"))
+    
+    if [ ${#SYMBOLS[@]} -eq 0 ]; then
+        echo -e "${RED}No symbols extracted from scanner file${NC}"
+        exit 1
+    fi
+    
+    echo -e "${GREEN}✓ Loaded top $TOP_N candidates from scanner${NC}"
+    echo ""
+fi
 
 # Use default if no symbols specified
 if [ ${#SYMBOLS[@]} -eq 0 ]; then
