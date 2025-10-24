@@ -60,10 +60,14 @@ def microstructure_agent_node(state: PipelineState) -> PipelineState:
             df = state[data_key]
 
             # Check if we have sufficient data for microstructure analysis
+            # Lower threshold for equities (may only have 3 days of intraday from Alpaca IEX)
             min_bars = mi_config.get('data', {}).get('min_tick_bars', 100)
-            if len(df) < min_bars:
-                logger.debug(f"Insufficient data for tier {tier}: {len(df)} < {min_bars} bars (expected for equities with limited intraday data)")
+            if len(df) < 20:  # Absolute minimum for any meaningful analysis
+                logger.debug(f"Insufficient data for tier {tier}: {len(df)} bars (minimum 20 required)")
                 continue
+            elif len(df) < min_bars:
+                logger.info(f"Limited data for tier {tier}: {len(df)} bars (proceeding with reduced confidence)")
+                # Continue with analysis using available data
 
             logger.info(f"Computing microstructure features for tier {tier} ({len(df)} bars)")
 

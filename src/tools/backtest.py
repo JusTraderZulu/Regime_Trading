@@ -978,10 +978,12 @@ def test_multiple_strategies(
             logger.info(f"  ✓ Best for {strategy_name}: Sharpe={best_strategy_result.sharpe:.2f} with params ({best_params_str})")
 
     if not best_overall_result:
-        logger.error("All strategies failed, using carry as fallback")
-        carry_spec = StrategySpec(name="carry", regime=regime, params={})
-        best_overall_result, all_results = backtest(carry_spec, df, config, artifacts_dir, tier, symbol), {}
-        return best_overall_result, all_results
+        logger.error(f"All strategies failed for {regime.value} regime - this indicates data or configuration issues")
+        # Return an empty result rather than silently using carry
+        # This makes the failure explicit rather than hidden
+        empty_spec = StrategySpec(name="no_viable_strategy", regime=regime, params={})
+        empty_result = _empty_backtest_result(empty_spec, tier, symbol)
+        return empty_result, {}
     
     best_name = best_overall_result.strategy.name
     logger.info(f"✓ Best overall strategy: {best_name} (Sharpe={best_overall_result.sharpe:.2f})")

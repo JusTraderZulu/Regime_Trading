@@ -117,6 +117,7 @@ def run_pipeline(
     mode: str = "fast",
     st_bar: Optional[str] = None,
     config_path: str = "config/settings.yaml",
+    config_overrides: Optional[Dict] = None,
 ) -> Dict:
     """
     Run the full pipeline for a symbol.
@@ -126,6 +127,7 @@ def run_pipeline(
         mode: "fast" (skip backtest) or "thorough" (full backtest)
         st_bar: Optional override for ST timeframe bar (e.g., "1h")
         config_path: Path to config file
+        config_overrides: Optional dict to override specific config values
 
     Returns:
         Final state dict with exec_report
@@ -134,6 +136,14 @@ def run_pipeline(
 
     # Load config
     config = load_config(config_path)
+    
+    # Apply config overrides
+    if config_overrides:
+        for key, value in config_overrides.items():
+            if key == 'qc_auto_submit':
+                config.setdefault('qc', {})['auto_submit'] = value
+            else:
+                config[key] = value
 
     # Create initial state
     initial_state = create_initial_state(

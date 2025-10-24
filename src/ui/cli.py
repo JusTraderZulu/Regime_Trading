@@ -52,22 +52,17 @@ def run_analysis(symbol: str, mode: str, st_bar: str | None, config: str, pdf: b
             logger.info("QC Cloud backtesting: ENABLED (via --qc-backtest flag)")
         logger.info(f"=" * 60)
 
-        # Enable QC auto-submit if flag is set
+        # Run pipeline with QC backtest override if flag is set
+        config_overrides = {}
         if qc_backtest:
-            from src.core.utils import load_config
-            config_dict = load_config(config)
-            if not config_dict.get("qc", {}).get("auto_submit"):
-                # Temporarily enable via environment/override
-                # Note: This is a quick hack; proper implementation would pass through state
-                import os
-                os.environ['QC_AUTO_SUBMIT'] = '1'
-
-        # Run pipeline
+            config_overrides['qc_auto_submit'] = True
+        
         final_state = run_pipeline(
             symbol=symbol,
             mode=mode,
             st_bar=st_bar,
             config_path=config,
+            config_overrides=config_overrides,
         )
 
         # Write report
