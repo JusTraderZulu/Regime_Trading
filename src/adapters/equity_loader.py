@@ -44,6 +44,17 @@ class EquityDataLoader:
         cache_path = self._get_cache_path(symbol, bar, end)
         if cache_path.exists():
             try:
+                # Check cache freshness for intraday data
+                import os
+                from datetime import datetime as dt
+                cache_age_hours = (dt.now().timestamp() - os.path.getmtime(cache_path)) / 3600
+                
+                # For intraday bars, refresh if cache is > 1 hour old
+                is_intraday = bar not in ['1d', '1D', 'day', 'Day']
+                if is_intraday and cache_age_hours > 1.0:
+                    logger.info(f"Alpaca cache stale ({cache_age_hours:.1f}h old), will refresh")
+                    return None  # Force refresh
+                
                 df = pd.read_parquet(cache_path)
                 df.index = pd.to_datetime(df.index, utc=True)
                 mask = (df.index >= start) & (df.index <= end)

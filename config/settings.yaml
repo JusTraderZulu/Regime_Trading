@@ -175,7 +175,7 @@ market_intelligence:
     macro_low: 0.20       # Low macro coupling = decoupled
 
 equities:
-  include_premarket: false
+  include_premarket: true   # Enable for ORB (Opening Range Breakout) analysis
   include_postmarket: false
   tz: "America/New_York"
   adjustment: "all"

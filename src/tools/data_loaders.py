@@ -41,11 +41,22 @@ class PolygonDataLoader:
         return symbol_dir / f"{date_str}.parquet"
 
     def _load_from_cache(self, symbol: str, bar: str, start: datetime, end: datetime) -> Optional[pd.DataFrame]:
-        """Try to load data from cache"""
+        """Try to load data from cache with freshness check"""
         # For simplicity, we cache by end date
         cache_path = self._get_cache_path(symbol, bar, end)
 
         if cache_path.exists():
+            # Check cache freshness for intraday data
+            import os
+            from datetime import datetime as dt
+            cache_age_hours = (dt.now().timestamp() - os.path.getmtime(cache_path)) / 3600
+            
+            # For intraday bars (<1d), refresh if cache is > 1 hour old
+            is_intraday = bar not in ['1d', '1D', 'day', 'Day']
+            if is_intraday and cache_age_hours > 1.0:
+                logger.info(f"Cache stale ({cache_age_hours:.1f}h old), will refresh: {cache_path}")
+                return None  # Force refresh
+            
             logger.info(f"Loading from cache: {cache_path}")
             df = pd.read_parquet(cache_path)
             df.index = pd.to_datetime(df.index, utc=True)
