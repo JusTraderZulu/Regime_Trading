@@ -424,22 +424,35 @@ def load_data_node(state: PipelineState) -> Dict:
                 logger.info(f"ST bar overridden to {bar}")
 
             try:
+                # Use Polygon for equity intraday (better historical depth), Alpaca for daily
+                equity_data_source_cfg = equities_cfg.get("data_source", {})
+                use_polygon_for_intraday = equity_data_source_cfg.get("intraday") == "polygon"
+                is_intraday = bar not in ["1d", "1D", "day", "Day"]
+                
                 if asset_class == "EQUITY" and equity_provider == "alpaca":
-                    df, meta = get_alpaca_bars(
-                        symbol=qc_symbol,
-                        bar=bar,
-                        lookback_days=lookback,
-                        include_premarket=equities_cfg.get("include_premarket", False),
-                        include_postmarket=equities_cfg.get("include_postmarket", False),
-                        tz=equities_cfg.get("tz", "America/New_York"),
-                        adjustment=equities_cfg.get("adjustment", "all"),
-                        feed=equity_feed,
-                    )
-                    df = _align_to_sessions(df, bar)
-                    results[f"data_{tier_key}"] = df
-                    meta.update({"feed": equity_feed, "tier": tier_str})
-                    equity_meta[tier_str] = meta
-                    logger.info(f"Loaded {len(df)} Alpaca bars for {tier_str} ({bar})")
+                    # Use Polygon for intraday if configured, Alpaca for daily
+                    if use_polygon_for_intraday and is_intraday:
+                        logger.info(f"Using Polygon for equity intraday data ({bar})")
+                        df = get_polygon_bars(symbol, bar, lookback_days=lookback)
+                        df = _align_to_sessions(df, bar)
+                        results[f"data_{tier_key}"] = df
+                        logger.info(f"Loaded {len(df)} Polygon bars for {tier_str} ({bar})")
+                    else:
+                        df, meta = get_alpaca_bars(
+                            symbol=qc_symbol,
+                            bar=bar,
+                            lookback_days=lookback,
+                            include_premarket=equities_cfg.get("include_premarket", False),
+                            include_postmarket=equities_cfg.get("include_postmarket", False),
+                            tz=equities_cfg.get("tz", "America/New_York"),
+                            adjustment=equities_cfg.get("adjustment", "all"),
+                            feed=equity_feed,
+                        )
+                        df = _align_to_sessions(df, bar)
+                        results[f"data_{tier_key}"] = df
+                        meta.update({"feed": equity_feed, "tier": tier_str})
+                        equity_meta[tier_str] = meta
+                        logger.info(f"Loaded {len(df)} Alpaca bars for {tier_str} ({bar})")
                 else:
                     df = get_polygon_bars(symbol, bar, lookback_days=lookback)
                     df = _align_to_sessions(df, bar)

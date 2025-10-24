@@ -179,6 +179,10 @@ equities:
   include_postmarket: false
   tz: "America/New_York"
   adjustment: "all"
+  # Data source selection (Polygon for intraday, Alpaca for daily)
+  data_source:
+    intraday: "polygon"  # Use Polygon for 15m, 4h (better historical depth)
+    daily: "alpaca"      # Use Alpaca for 1d (works fine)
   timeframes:
     MT:
       bar: "1h"
@@ -393,8 +397,8 @@ features:
     window_bars:
       LT: 1000
       MT: 1656
-      ST: 1689
-      US: 1729
+      ST: 500   # Lowered from 1689 to work with limited equity intraday (Polygon gives ~1850 bars)
+      US: 500   # Lowered from 1729 for consistency
     sigma_window: 5
     persist_labels: true
     persist_dir: "artifacts/warmstart"
