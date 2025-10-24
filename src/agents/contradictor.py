@@ -9,7 +9,8 @@ from typing import Dict, List
 
 from src.core.schemas import ContradictorReport, Tier
 from src.core.state import PipelineState
-from src.tools.data_loaders import get_polygon_bars
+from src.tools.data_loaders import get_polygon_bars, get_alpaca_bars
+from src.bridges.symbol_map import parse_symbol_info
 from src.tools.features import compute_feature_bundle
 
 logger = logging.getLogger(__name__)
@@ -74,12 +75,18 @@ def contradictor_node(state: PipelineState) -> Dict:
             )
         }
 
-    # Load data with alternate bar
+    # Load data with alternate bar (use correct data source per asset class)
     try:
         timeframes = config.get("timeframes", {})
         st_lookback = timeframes.get("ST", {}).get("lookback", 30)
 
-        alt_df = get_polygon_bars(symbol, alternate_bar, lookback_days=st_lookback)
+        # Determine asset class and use appropriate data source
+        _, asset_class, _ = parse_symbol_info(symbol)
+        
+        if asset_class == "EQUITY":
+            alt_df, _ = get_alpaca_bars(symbol, alternate_bar, lookback_days=st_lookback)
+        else:
+            alt_df = get_polygon_bars(symbol, alternate_bar, lookback_days=st_lookback)
 
         if alt_df.empty:
             logger.warning(f"No data for alternate bar {alternate_bar}")
