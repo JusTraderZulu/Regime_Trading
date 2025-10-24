@@ -33,8 +33,14 @@ def compute_scanner_metrics(
     df_4h = data.get('4h')
     df_15m = data.get('15m')
     
-    # Need at least one timeframe with data
-    primary_df = df_4h if df_4h is not None and not df_4h.empty else (df_1d if df_1d is not None else df_15m)
+    # Prefer 1d data for equities (most reliable), fallback to 4h, then 15m
+    # Use the timeframe with the most data
+    candidates = [
+        (df_1d, len(df_1d) if df_1d is not None and not df_1d.empty else 0),
+        (df_4h, len(df_4h) if df_4h is not None and not df_4h.empty else 0),
+        (df_15m, len(df_15m) if df_15m is not None and not df_15m.empty else 0),
+    ]
+    primary_df = max(candidates, key=lambda x: x[1])[0]
     
     if primary_df is None or primary_df.empty or len(primary_df) < 20:
         return None
