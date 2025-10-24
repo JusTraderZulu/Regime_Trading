@@ -41,6 +41,12 @@ def fetch_bars_for_scanner(
         # Determine data source
         _, asset_class, _ = parse_symbol_info(symbol)
         
+        # Check if equities should use Polygon (requires upgraded subscription)
+        from src.core.utils import load_config
+        config = load_config('config/settings.yaml')
+        equity_cfg = config.get('equities', {})
+        equity_data_source = equity_cfg.get('data_source', {}).get('provider', 'alpaca')
+        
         for tf in timeframes:
             try:
                 # Calculate lookback days from bars
@@ -53,8 +59,10 @@ def fetch_bars_for_scanner(
                 else:
                     lookback_days = 30  # Default
                 
-                # Fetch data
-                if asset_class == 'EQUITY':
+                # Fetch data using configured source
+                if asset_class == 'EQUITY' and equity_data_source == 'polygon':
+                    df = get_polygon_bars(symbol, tf, lookback_days=lookback_days)
+                elif asset_class == 'EQUITY':
                     df, meta = get_alpaca_bars(symbol, tf, lookback_days=lookback_days)
                 else:
                     df = get_polygon_bars(symbol, tf, lookback_days=lookback_days)

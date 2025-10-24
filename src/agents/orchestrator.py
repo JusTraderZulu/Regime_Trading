@@ -425,9 +425,22 @@ def load_data_node(state: PipelineState) -> Dict:
 
             try:
                 # Data source strategy:
-                # - Equities: Use Alpaca (both Alpaca/Polygon limited to ~3 days intraday, Alpaca is free)
-                # - Crypto/Forex: Use Polygon (paid plan gives full historical depth)
-                if asset_class == "EQUITY" and equity_provider == "alpaca":
+                # - Check if equities configured to use Polygon (upgraded subscription)
+                # - Otherwise use Alpaca for equities (free tier)
+                # - Always use Polygon for crypto/forex (paid plan)
+                
+                equity_data_source_cfg = equities_cfg.get("data_source", {})
+                use_polygon_for_equities = equity_data_source_cfg.get("provider") == "polygon"
+                
+                if asset_class == "EQUITY" and use_polygon_for_equities:
+                    # Use Polygon for equities (Starter+ subscription with full intraday)
+                    logger.info(f"Using Polygon for equity data ({bar})")
+                    df = get_polygon_bars(symbol, bar, lookback_days=lookback)
+                    df = _align_to_sessions(df, bar)
+                    results[f"data_{tier_key}"] = df
+                    logger.info(f"Loaded {len(df)} Polygon bars for {tier_str} ({bar})")
+                elif asset_class == "EQUITY" and equity_provider == "alpaca":
+                    # Use Alpaca for equities (fallback or free tier)
                     df, meta = get_alpaca_bars(
                         symbol=qc_symbol,
                         bar=bar,
@@ -444,7 +457,7 @@ def load_data_node(state: PipelineState) -> Dict:
                     equity_meta[tier_str] = meta
                     logger.info(f"Loaded {len(df)} Alpaca bars for {tier_str} ({bar})")
                 else:
-                    # Crypto/Forex use Polygon (paid plan with full historical depth)
+                    # Crypto/Forex always use Polygon (paid plan with full historical depth)
                     df = get_polygon_bars(symbol, bar, lookback_days=lookback)
                     df = _align_to_sessions(df, bar)
                     results[f"data_{tier_key}"] = df

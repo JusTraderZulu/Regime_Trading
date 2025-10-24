@@ -179,8 +179,9 @@ equities:
   include_postmarket: false
   tz: "America/New_York"
   adjustment: "all"
-  # Data source: Use Alpaca (Polygon limits equity intraday to 3 days regardless of subscription)
-  # Note: Both Alpaca and Polygon give ~3 days of equity intraday, Alpaca is free
+  # Data source: Use Polygon for ALL equity data (upgraded subscription with full intraday access)
+  data_source:
+    provider: "polygon"  # Use Polygon for all timeframes (full historical depth with Starter+ plan)
   timeframes:
     MT:
       bar: "1h"

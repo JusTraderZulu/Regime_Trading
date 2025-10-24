@@ -83,7 +83,13 @@ def contradictor_node(state: PipelineState) -> Dict:
         # Determine asset class and use appropriate data source
         _, asset_class, _ = parse_symbol_info(symbol)
         
-        if asset_class == "EQUITY":
+        # Check if equities configured to use Polygon
+        equity_cfg = config.get("equities", {})
+        equity_data_source = equity_cfg.get("data_source", {}).get("provider", "alpaca")
+        
+        if asset_class == "EQUITY" and equity_data_source == "polygon":
+            alt_df = get_polygon_bars(symbol, alternate_bar, lookback_days=st_lookback)
+        elif asset_class == "EQUITY":
             alt_df, _ = get_alpaca_bars(symbol, alternate_bar, lookback_days=st_lookback)
         else:
             alt_df = get_polygon_bars(symbol, alternate_bar, lookback_days=st_lookback)
