@@ -396,96 +396,141 @@ SYMBOL_MAP = {
     "XLF": "XLF",
     "XLK": "XLK",
     
-    # Tech Stocks
-    "AAPL": "AAPL",
-    "NASDAQ:AAPL": "AAPL",
-    "MSFT": "MSFT",
-    "NASDAQ:MSFT": "MSFT",
-    "NVDA": "NVDA",
-    "NASDAQ:NVDA": "NVDA",
-    "META": "META",
-    "NASDAQ:META": "META",
-    "GOOGL": "GOOGL",
-    "NASDAQ:GOOGL": "GOOGL",
-    "AMZN": "AMZN",
-    "NASDAQ:AMZN": "AMZN",
-    "TSLA": "TSLA",
-    "NASDAQ:TSLA": "TSLA",
-    "NFLX": "NFLX",
-    "AMD": "AMD",
-    "INTC": "INTC",
-    "QCOM": "QCOM",
-    "ORCL": "ORCL",
-    "CRM": "CRM",
-    "ADBE": "ADBE",
-    "CSCO": "CSCO",
-    "ASML": "ASML",
-    "AVGO": "AVGO",
-    "TXN": "TXN",
-    "AMAT": "AMAT",
-    "MU": "MU",
-    "SHOP": "SHOP",
-    "SQ": "SQ",
-    "PYPL": "PYPL",
+    # Tech Stocks (FAANG+)
+    "AAPL": "AAPL", "NASDAQ:AAPL": "AAPL",
+    "MSFT": "MSFT", "NASDAQ:MSFT": "MSFT",
+    "NVDA": "NVDA", "NASDAQ:NVDA": "NVDA",
+    "META": "META", "NASDAQ:META": "META",
+    "GOOGL": "GOOGL", "GOOG": "GOOG", "NASDAQ:GOOGL": "GOOGL",
+    "AMZN": "AMZN", "NASDAQ:AMZN": "AMZN",
+    "TSLA": "TSLA", "NASDAQ:TSLA": "TSLA",
+    "NFLX": "NFLX", "NASDAQ:NFLX": "NFLX",
     
-    # Finance
-    "JPM": "JPM",
-    "BAC": "BAC",
-    "WFC": "WFC",
-    "GS": "GS",
-    "MS": "MS",
-    "MA": "MA",
-    "V": "V",
+    # Semiconductors
+    "AMD": "AMD", "INTC": "INTC", "QCOM": "QCOM", "AVGO": "AVGO",
+    "TXN": "TXN", "AMAT": "AMAT", "MU": "MU", "LRCX": "LRCX",
+    "KLAC": "KLAC", "MCHP": "MCHP", "MRVL": "MRVL", "ON": "ON",
+    "SWKS": "SWKS", "QRVO": "QRVO", "MPWR": "MPWR", "NXPI": "NXPI", "ADI": "ADI",
+    
+    # Software/Cloud
+    "CRM": "CRM", "ORCL": "ORCL", "ADBE": "ADBE", "NOW": "NOW",
+    "INTU": "INTU", "IBM": "IBM", "ANET": "ANET", "PANW": "PANW",
+    "CRWD": "CRWD", "SNOW": "SNOW", "DDOG": "DDOG", "NET": "NET",
+    "ZS": "ZS", "OKTA": "OKTA", "FTNT": "FTNT",
+    
+    # Internet/E-commerce
+    "SHOP": "SHOP", "SQ": "SQ", "PYPL": "PYPL", "ABNB": "ABNB", "BKNG": "BKNG",
+    
+    # Networking
+    "CSCO": "CSCO", "ANET": "ANET",
+    
+    # Other Tech
+    "ASML": "ASML",
+    
+    # Finance - Banks
+    "JPM": "JPM", "BAC": "BAC", "WFC": "WFC", "C": "C",
+    "USB": "USB", "PNC": "PNC", "TFC": "TFC", "BK": "BK", "STT": "STT",
+    
+    # Finance - Investment
+    "GS": "GS", "MS": "MS", "BLK": "BLK", "SCHW": "SCHW",
+    "AXP": "AXP", "COF": "COF", "TROW": "TROW",
+    
+    # Finance - Payments
+    "MA": "MA", "V": "V",
+    
+    # Finance - Exchanges/Data
+    "CME": "CME", "ICE": "ICE", "NDAQ": "NDAQ", "SPGI": "SPGI", "MCO": "MCO",
     
     # Crypto-Related Stocks
-    "COIN": "COIN",
-    "MSTR": "MSTR",
-    "MARA": "MARA",
-    "RIOT": "RIOT",
+    "COIN": "COIN", "MSTR": "MSTR", "MARA": "MARA", "RIOT": "RIOT",
+    "CLSK": "CLSK", "HUT": "HUT",
     
-    # Energy
-    "XOM": "XOM",
-    "CVX": "CVX",
-    "COP": "COP",
-    "SLB": "SLB",
-    "NEE": "NEE",
+    # Energy - Oil & Gas
+    "XOM": "XOM", "CVX": "CVX", "COP": "COP", "SLB": "SLB",
+    "EOG": "EOG", "PSX": "PSX", "VLO": "VLO", "MPC": "MPC",
+    "OXY": "OXY", "HAL": "HAL", "BKR": "BKR", "DVN": "DVN",
+    "FANG": "FANG", "APA": "APA",
     
-    # Healthcare/Pharma
-    "JNJ": "JNJ",
-    "UNH": "UNH",
-    "LLY": "LLY",
-    "PFE": "PFE",
-    "ABBV": "ABBV",
-    "MRK": "MRK",
+    # Energy - Utilities
+    "NEE": "NEE", "DUK": "DUK", "SO": "SO", "D": "D",
+    "AEP": "AEP", "EXC": "EXC", "SRE": "SRE", "XEL": "XEL",
+    "ED": "ED", "WEC": "WEC", "ES": "ES", "PEG": "PEG",
+    "FE": "FE", "ETR": "ETR", "AEE": "AEE", "CMS": "CMS",
     
-    # Consumer
-    "WMT": "WMT",
-    "COST": "COST",
-    "HD": "HD",
-    "LOW": "LOW",
-    "MCD": "MCD",
-    "SBUX": "SBUX",
+    # Healthcare - Pharma
+    "JNJ": "JNJ", "LLY": "LLY", "ABBV": "ABBV", "PFE": "PFE",
+    "MRK": "MRK", "BMY": "BMY", "AMGN": "AMGN", "GILD": "GILD",
+    "REGN": "REGN", "VRTX": "VRTX", "BIIB": "BIIB", "MRNA": "MRNA", "BNTX": "BNTX",
+    
+    # Healthcare - Insurance/Services
+    "UNH": "UNH", "CVS": "CVS", "CI": "CI", "HUM": "HUM",
+    "ELV": "ELV", "CNC": "CNC", "MOH": "MOH",
+    
+    # Healthcare - Equipment/Biotech
+    "ABT": "ABT", "TMO": "TMO", "DHR": "DHR", "ISRG": "ISRG",
+    "ZTS": "ZTS", "ILMN": "ILMN",
+    
+    # Consumer Discretionary - Retail
+    "WMT": "WMT", "COST": "COST", "HD": "HD", "LOW": "LOW",
+    "TGT": "TGT", "TJX": "TJX", "ROST": "ROST", "DG": "DG", "DLTR": "DLTR",
+    
+    # Consumer Discretionary - Restaurants/Food
+    "MCD": "MCD", "SBUX": "SBUX",
+    
+    # Consumer Discretionary - Apparel/Leisure
     "NKE": "NKE",
-    "DIS": "DIS",
-    "KO": "KO",
-    "PEP": "PEP",
     
-    # Industrial/Transportation
-    "BA": "BA",
-    "CAT": "CAT",
-    "GE": "GE",
-    "UPS": "UPS",
-    "FDX": "FDX",
-    "DAL": "DAL",
-    "UAL": "UAL",
-    "AAL": "AAL",
-    "GM": "GM",
-    "F": "F",
-    "NUE": "NUE",
+    # Consumer Discretionary - Media/Entertainment
+    "DIS": "DIS", "CMCSA": "CMCSA",
+    
+    # Consumer Discretionary - Travel/Hospitality
+    "MAR": "MAR", "HLT": "HLT", "ABNB": "ABNB",
+    "CCL": "CCL", "RCL": "RCL", "NCLH": "NCLH", "NLC": "NLC",
+    
+    # Consumer Discretionary - Automotive
+    "F": "F", "GM": "GM", "TM": "TM", "HMC": "HMC",
+    
+    # Consumer Staples - Food/Beverage
+    "PG": "PG", "KO": "KO", "PEP": "PEP", "PM": "PM", "MO": "MO",
+    "MDLZ": "MDLZ", "CL": "CL", "KMB": "KMB", "GIS": "GIS",
+    "K": "K", "HSY": "HSY", "SJM": "SJM", "CPB": "CPB",
+    "KHC": "KHC", "MNST": "MNST", "STZ": "STZ", "TAP": "TAP", "BF.B": "BF.B",
+    
+    # Industrials - Aerospace/Defense
+    "BA": "BA", "RTX": "RTX", "LMT": "LMT", "NOC": "NOC", "GD": "GD",
+    
+    # Industrials - Machinery/Equipment
+    "CAT": "CAT", "GE": "GE", "HON": "HON", "DE": "DE",
+    "EMR": "EMR", "MMM": "MMM", "ETN": "ETN", "PH": "PH",
+    "ROK": "ROK", "DOV": "DOV", "XYL": "XYL", "IR": "IR",
+    "CARR": "CARR", "OTIS": "OTIS", "PCAR": "PCAR",
+    
+    # Industrials - Transportation/Logistics
+    "UNP": "UNP", "NSC": "NSC", "CSX": "CSX",
+    "UPS": "UPS", "FDX": "FDX",
+    "DAL": "DAL", "UAL": "UAL", "AAL": "AAL", "LUV": "LUV",
+    
+    # Materials - Metals/Mining
+    "NUE": "NUE", "FCX": "FCX", "NEM": "NEM", "GOLD": "GOLD",
+    "AA": "AA", "X": "X", "CLF": "CLF", "VMC": "VMC", "MLM": "MLM",
+    
+    # Materials - Chemicals
+    "APD": "APD", "LIN": "LIN", "ECL": "ECL", "DD": "DD",
+    "DOW": "DOW", "PPG": "PPG", "SHW": "SHW",
+    
+    # Real Estate
+    "AMT": "AMT", "PLD": "PLD", "CCI": "CCI", "EQIX": "EQIX",
+    "PSA": "PSA", "DLR": "DLR", "O": "O", "WELL": "WELL",
+    "AVB": "AVB", "EQR": "EQR", "MAA": "MAA", "ESS": "ESS",
+    "VTR": "VTR", "ARE": "ARE",
+    
+    # Communications
+    "T": "T", "VZ": "VZ", "TMUS": "TMUS", "CHTR": "CHTR",
+    "PARA": "PARA", "FOX": "FOX", "FOXA": "FOXA", "DISH": "DISH",
+    "NWSA": "NWSA", "NWS": "NWS", "OMC": "OMC", "IPG": "IPG",
     
     # Other
-    "NAVN": "NAVN",
-    "NVAN": "NVAN",
+    "NAVN": "NAVN", "NVAN": "NVAN",
 }
 
 # Reverse map (QC → internal) - prefer first occurrence (canonical)
@@ -530,22 +575,51 @@ FX_SYMBOLS = {
 EQUITY_SYMBOLS = {
     # Indices/ETFs
     "SPY", "QQQ", "DIA", "IWM", "VIX", "DXY", "XLE", "XLF", "XLK",
-    # Tech
-    "AAPL", "MSFT", "NVDA", "META", "GOOGL", "AMZN", "TSLA", "NFLX",
-    "AMD", "INTC", "QCOM", "ORCL", "CRM", "ADBE", "CSCO", "ASML", "AVGO",
-    "TXN", "AMAT", "MU", "SHOP", "SQ", "PYPL",
-    # Finance
-    "JPM", "BAC", "WFC", "GS", "MS", "MA", "V",
+    # Tech/Software (100+)
+    "AAPL", "MSFT", "NVDA", "META", "GOOGL", "GOOG", "AMZN", "TSLA", "NFLX",
+    "AMD", "INTC", "QCOM", "AVGO", "TXN", "AMAT", "MU", "LRCX", "KLAC",
+    "MCHP", "MRVL", "ON", "SWKS", "QRVO", "MPWR", "NXPI", "ADI",
+    "CRM", "ORCL", "ADBE", "NOW", "INTU", "IBM", "ANET", "PANW",
+    "CRWD", "SNOW", "DDOG", "NET", "ZS", "OKTA", "FTNT", "CSCO", "ASML",
+    "SHOP", "SQ", "PYPL", "ABNB", "BKNG",
+    # Finance (40+)
+    "JPM", "BAC", "WFC", "C", "USB", "PNC", "TFC", "BK", "STT",
+    "GS", "MS", "BLK", "SCHW", "AXP", "COF", "TROW",
+    "MA", "V", "CME", "ICE", "NDAQ", "SPGI", "MCO",
     # Crypto Stocks
-    "COIN", "MSTR", "MARA", "RIOT",
-    # Energy
-    "XOM", "CVX", "COP", "SLB", "NEE",
-    # Healthcare
-    "JNJ", "UNH", "LLY", "PFE", "ABBV", "MRK",
-    # Consumer
-    "WMT", "COST", "HD", "LOW", "MCD", "SBUX", "NKE", "DIS", "KO", "PEP",
-    # Industrial
-    "BA", "CAT", "GE", "UPS", "FDX", "DAL", "UAL", "AAL", "GM", "F", "NUE",
+    "COIN", "MSTR", "MARA", "RIOT", "CLSK", "HUT",
+    # Energy (30+)
+    "XOM", "CVX", "COP", "SLB", "EOG", "PSX", "VLO", "MPC",
+    "OXY", "HAL", "BKR", "DVN", "FANG", "APA",
+    "NEE", "DUK", "SO", "D", "AEP", "EXC", "SRE", "XEL",
+    "ED", "WEC", "ES", "PEG", "FE", "ETR", "AEE", "CMS",
+    # Healthcare (40+)
+    "JNJ", "UNH", "LLY", "ABBV", "PFE", "MRK", "BMY", "AMGN", "GILD",
+    "CVS", "CI", "HUM", "ELV", "CNC", "MOH",
+    "ABT", "TMO", "DHR", "ISRG", "ZTS", "ILMN",
+    "REGN", "VRTX", "BIIB", "MRNA", "BNTX",
+    # Consumer (50+)
+    "WMT", "COST", "HD", "LOW", "TGT", "TJX", "ROST", "DG", "DLTR",
+    "MCD", "SBUX", "NKE", "DIS", "CMCSA",
+    "MAR", "HLT", "CCL", "RCL", "NCLH", "NLC",
+    "F", "GM", "TM", "HMC",
+    "PG", "KO", "PEP", "PM", "MO", "MDLZ", "CL", "KMB", "GIS",
+    "K", "HSY", "SJM", "CPB", "KHC", "MNST", "STZ", "TAP", "BF.B",
+    # Industrials (50+)
+    "BA", "RTX", "LMT", "NOC", "GD",
+    "CAT", "GE", "HON", "DE", "EMR", "MMM", "ETN", "PH",
+    "ROK", "DOV", "XYL", "IR", "CARR", "OTIS", "PCAR",
+    "UNP", "NSC", "CSX", "UPS", "FDX",
+    "DAL", "UAL", "AAL", "LUV",
+    # Materials (20+)
+    "NUE", "FCX", "NEM", "GOLD", "AA", "X", "CLF", "VMC", "MLM",
+    "APD", "LIN", "ECL", "DD", "DOW", "PPG", "SHW",
+    # Real Estate (15+)
+    "AMT", "PLD", "CCI", "EQIX", "PSA", "DLR", "O", "WELL",
+    "AVB", "EQR", "MAA", "ESS", "VTR", "ARE",
+    # Communications (15+)
+    "T", "VZ", "TMUS", "CHTR", "PARA", "FOX", "FOXA", "DISH",
+    "NWSA", "NWS", "OMC", "IPG",
     # Other
     "NAVN", "NVAN",
 }
