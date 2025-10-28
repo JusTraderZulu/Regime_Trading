@@ -269,6 +269,8 @@ class ExecutionEngine:
         """
         Execute regime signals across brokers.
         
+        Applies volatility targeting if enabled in config before execution.
+        
         Args:
             signals: List of signal dicts from pipeline
             
@@ -277,13 +279,19 @@ class ExecutionEngine:
         """
         self.logger.info(f"Executing {len(signals)} signals across {len(self.brokers)} brokers")
         
+        # Apply volatility targeting if enabled
+        vol_target_cfg = self.config.get("risk", {}).get("volatility_targeting", {})
+        if vol_target_cfg.get("enabled", False):
+            signals = self._apply_volatility_targeting(signals, vol_target_cfg)
+        
         results = {
             'timestamp': datetime.now(),
             'signals_received': len(signals),
             'orders_submitted': 0,
             'orders_filled': 0,
             'errors': [],
-            'broker_results': {}
+            'broker_results': {},
+            'volatility_targeting_applied': vol_target_cfg.get("enabled", False)
         }
         
         for broker_name, broker in self.brokers.items():
@@ -408,6 +416,86 @@ class ExecutionEngine:
             quantity = int(quantity)  # Stocks/forex
         
         return quantity
+    
+    def _apply_volatility_targeting(
+        self,
+        signals: List[Dict[str, Any]],
+        vol_target_cfg: Dict
+    ) -> List[Dict[str, Any]]:
+        """
+        Apply volatility targeting to scale signal weights.
+        
+        Args:
+            signals: List of signal dicts
+            vol_target_cfg: Volatility targeting configuration
+            
+        Returns:
+            Updated signals with scaled weights
+        """
+        try:
+            from src.execution.volatility_targeting import (
+                VolatilityTargetAllocator,
+                VolatilityTargetConfig
+            )
+            from src.data.manager import DataAccessManager
+            
+            # Build config
+            vt_config = VolatilityTargetConfig(
+                target_volatility=vol_target_cfg.get("target_volatility", 0.15),
+                lookback_days=vol_target_cfg.get("lookback_days", 30),
+                min_observations=vol_target_cfg.get("min_observations", 20),
+                min_weight=vol_target_cfg.get("min_weight", 0.0),
+                max_weight=vol_target_cfg.get("max_weight", 0.25),
+                use_shrinkage=vol_target_cfg.get("use_shrinkage", True),
+                annualization_factor=vol_target_cfg.get("annualization_factor", 252.0)
+            )
+            
+            # Collect weights
+            signal_weights = {sig['symbol']: sig.get('weight', 0.0) for sig in signals}
+            
+            # Get returns data
+            returns_data = {}
+            manager = DataAccessManager()
+            
+            for symbol in signal_weights.keys():
+                try:
+                    df_daily, _, _ = manager.get_bars(
+                        symbol=symbol,
+                        tier='LT',
+                        asset_class='equities',
+                        bar='1d',
+                        lookback_days=vt_config.lookback_days + 5
+                    )
+                    
+                    if df_daily is not None and len(df_daily) > 1:
+                        returns = df_daily['close'].pct_change().dropna()
+                        returns_data[symbol] = returns
+                except Exception as e:
+                    self.logger.warning(f"Failed to get returns for {symbol}: {e}")
+            
+            # Apply allocation
+            allocator = VolatilityTargetAllocator(vt_config)
+            scaled_weights, diagnostics = allocator.allocate(signal_weights, returns_data)
+            
+            # Update signal weights
+            for signal in signals:
+                symbol = signal['symbol']
+                if symbol in scaled_weights:
+                    original_weight = signal.get('weight', 0.0)
+                    signal['weight'] = scaled_weights[symbol]
+                    signal['vol_targeting_applied'] = True
+                    signal['original_weight'] = original_weight
+            
+            self.logger.info(
+                f"✓ Volatility targeting: scale={diagnostics.scaling_factor:.2f}, "
+                f"est_vol={diagnostics.estimated_volatility:.1%}"
+            )
+            
+            return signals
+            
+        except Exception as e:
+            self.logger.error(f"Volatility targeting failed: {e}")
+            return signals  # Return unmodified on error
 
 
 

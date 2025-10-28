@@ -462,6 +462,20 @@ qc:
   timeout_seconds: 300  # Max wait time if wait_for_results = true
 
 # =============================================================================
+# Risk Management - Volatility Targeting
+# =============================================================================
+risk:
+  volatility_targeting:
+    enabled: false              # Enable volatility-targeted allocation
+    target_volatility: 0.15     # Target portfolio volatility (15% annualized)
+    lookback_days: 30           # Days for covariance estimation
+    min_observations: 20        # Minimum bars required for reliable estimation
+    min_weight: 0.00            # Minimum position weight (0%)
+    max_weight: 0.25            # Maximum position weight (25% per position)
+    use_shrinkage: true         # Use Ledoit-Wolf shrinkage for covariance
+    annualization_factor: 252   # Trading days per year for volatility scaling
+
+# =============================================================================
 # Data Pipeline Configuration (Retry, Fallback, Second Aggregates)
 # =============================================================================
 data_pipeline:

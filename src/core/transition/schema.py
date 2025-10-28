@@ -23,6 +23,12 @@ class TransitionStats(BaseModel):
 	sigma_around_flip_ratio: float
 	pnl_slice: Optional[Dict[str, float]] = None
 	alerts: List[str] = []
+	
+	# Confidence intervals (NEW)
+	flip_density_ci: Optional[Dict[str, float]] = None  # {'lower': 0.03, 'upper': 0.07}
+	median_duration_ci: Optional[Dict[str, float]] = None  # Bootstrap CI
+	entropy_ci: Optional[Dict[str, float]] = None  # Bayesian or bootstrap CI
+	sample_size: Optional[int] = None  # Number of transitions observed
 
 
 class AdaptiveSuggestion(BaseModel):

@@ -1700,6 +1700,88 @@ def export_signals_node(state: PipelineState) -> Dict:
         logger.warning("No signals generated")
         return {}
     
+    # Apply volatility targeting if enabled (before signals written)
+    vol_target_cfg = config.get("risk", {}).get("volatility_targeting", {})
+    if vol_target_cfg.get("enabled", False):
+        try:
+            from src.execution.volatility_targeting import (
+                VolatilityTargetAllocator,
+                VolatilityTargetConfig
+            )
+            
+            # Build config from settings
+            vt_config = VolatilityTargetConfig(
+                target_volatility=vol_target_cfg.get("target_volatility", 0.15),
+                lookback_days=vol_target_cfg.get("lookback_days", 30),
+                min_observations=vol_target_cfg.get("min_observations", 20),
+                min_weight=vol_target_cfg.get("min_weight", 0.0),
+                max_weight=vol_target_cfg.get("max_weight", 0.25),
+                use_shrinkage=vol_target_cfg.get("use_shrinkage", True),
+                annualization_factor=vol_target_cfg.get("annualization_factor", 252.0)
+            )
+            
+            # Collect signal weights by symbol
+            signal_weights = {}
+            symbol_to_signal_idx = {}
+            for idx, signal in enumerate(signals):
+                symbol = signal.symbol
+                weight = signal.weight
+                if symbol not in signal_weights or weight > signal_weights[symbol]:
+                    signal_weights[symbol] = weight
+                    symbol_to_signal_idx[symbol] = idx
+            
+            # Get recent returns for all assets via DataAccessManager
+            returns_data = {}
+            data_manager = state.get('_data_manager')  # Reuse if available
+            if not data_manager:
+                from src.data.manager import DataAccessManager
+                data_manager = DataAccessManager()
+            
+            for symbol in signal_weights.keys():
+                try:
+                    # Get recent daily data for returns calculation
+                    df_daily, _, _ = data_manager.get_bars(
+                        symbol=symbol,
+                        tier='LT',
+                        asset_class='equities',  # Will be overridden by parse_symbol_info
+                        bar='1d',
+                        lookback_days=vt_config.lookback_days + 5
+                    )
+                    
+                    if df_daily is not None and len(df_daily) > 1:
+                        returns = df_daily['close'].pct_change().dropna()
+                        returns_data[symbol] = returns
+                except Exception as e:
+                    logger.warning(f"Failed to get returns for {symbol}: {e}")
+            
+            # Apply volatility targeting
+            allocator = VolatilityTargetAllocator(vt_config)
+            scaled_weights, diagnostics = allocator.allocate(signal_weights, returns_data)
+            
+            # Update signal weights
+            for symbol, scaled_weight in scaled_weights.items():
+                if symbol in symbol_to_signal_idx:
+                    idx = symbol_to_signal_idx[symbol]
+                    signals[idx].weight = scaled_weight
+            
+            # Store diagnostics in state
+            state['volatility_targeting_diagnostics'] = diagnostics.to_dict()
+            
+            logger.info(
+                f"✓ Volatility targeting applied: "
+                f"scale={diagnostics.scaling_factor:.2f}, "
+                f"est_vol={diagnostics.estimated_volatility:.1%}, "
+                f"target={diagnostics.target_volatility:.1%}"
+            )
+            
+            if diagnostics.warnings:
+                for warning in diagnostics.warnings:
+                    logger.warning(f"Vol targeting: {warning}")
+                    
+        except Exception as e:
+            logger.error(f"Volatility targeting failed: {e}")
+            # Continue without vol targeting (non-breaking)
+    
     # Sort signals by time to ensure chronological order
     signals.sort(key=lambda s: s.time)
     
