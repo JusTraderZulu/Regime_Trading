@@ -74,8 +74,37 @@ def microstructure_agent_node(state: PipelineState) -> PipelineState:
             # Check if enhanced microstructure is enabled
             use_enhanced = mi_config.get('enhanced', False) or config.get('data_sources', {}).get('enhanced_loader', {}).get('use_for', {}).get('microstructure', False)
             
-            # Run microstructure analysis
-            tier_results = create_microstructure_features(df, mi_config, Tier(tier), state['symbol'], use_enhanced=use_enhanced)
+            # Check if second-level data should be used for microstructure (NEW)
+            use_second_data = mi_config.get('use_second_data', False)
+            second_level_results = None
+            
+            if use_second_data:
+                # Fetch and analyze second-level data
+                try:
+                    from src.tools.second_level_analysis import run_second_level_analysis
+                    
+                    second_lookback = mi_config.get('second_data_lookback', 1)
+                    logger.info(f"Fetching second-level data for {state['symbol']} (lookback: {second_lookback}d)")
+                    
+                    second_level_results = run_second_level_analysis(
+                        symbol=state['symbol'],
+                        lookback_days=second_lookback
+                    )
+                    
+                    if second_level_results:
+                        logger.info(f"✓ Second-level analysis complete ({second_level_results['n_seconds']} seconds)")
+                    else:
+                        logger.warning("Second-level analysis returned no results")
+                        
+                except Exception as e:
+                    logger.warning(f"Second-level analysis failed (continuing with OHLCV): {e}")
+            
+            # Run microstructure analysis (with optional second-level enhancement)
+            tier_results = create_microstructure_features(
+                df, mi_config, Tier(tier), state['symbol'], 
+                use_enhanced=use_enhanced,
+                second_level_data=second_level_results
+            )
 
             if tier_results:
                 microstructure_results[tier] = tier_results
