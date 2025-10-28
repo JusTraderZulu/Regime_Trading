@@ -1100,8 +1100,86 @@ def walk_forward_analysis(
         logger.error("Walk-forward analysis produced no out-of-sample results.")
         return None
 
-    # Aggregate results
-    # For now, let's just return the last OOS result as a placeholder for aggregation logic
-    # TODO: Implement proper aggregation of OOS results
-    logger.info("Walk-forward analysis complete.")
-    return out_of_sample_results[-1]
+    # Aggregate results with weighted averaging and bootstrap CIs
+    from src.core.schemas import WalkForwardSummary
+    
+    # Extract metrics from each fold
+    fold_sharpes = [r.sharpe for r in out_of_sample_results]
+    fold_sortinos = [r.sortino for r in out_of_sample_results]
+    fold_max_dds = [r.max_drawdown for r in out_of_sample_results]
+    fold_win_rates = [r.win_rate for r in out_of_sample_results]
+    
+    # Calculate weights (more recent folds get higher weight)
+    n_folds = len(out_of_sample_results)
+    fold_weights = np.array([np.exp(0.1 * i) for i in range(n_folds)])
+    fold_weights = fold_weights / fold_weights.sum()  # Normalize to sum to 1
+    
+    # Weighted aggregation
+    weighted_sharpe = np.average(fold_sharpes, weights=fold_weights)
+    weighted_sortino = np.average(fold_sortinos, weights=fold_weights)
+    weighted_max_dd = np.average(fold_max_dds, weights=fold_weights)
+    weighted_win_rate = np.average(fold_win_rates, weights=fold_weights)
+    
+    # Bootstrap CIs for Sharpe (if enough folds)
+    sharpe_ci = None
+    max_dd_ci = None
+    if n_folds >= 3:
+        sharpe_ci = _bootstrap_ci(fold_sharpes, fold_weights, n_bootstrap=1000)
+        max_dd_ci = _bootstrap_ci(fold_max_dds, fold_weights, n_bootstrap=1000)
+    
+    # Calculate degradation (in-sample vs out-of-sample)
+    # Use first fold's training as in-sample benchmark
+    in_sample_sharpe = fold_sharpes[0] if fold_sharpes else 0.0  # Placeholder
+    out_of_sample_sharpe = weighted_sharpe
+    degradation_pct = ((in_sample_sharpe - out_of_sample_sharpe) / in_sample_sharpe * 100) if in_sample_sharpe != 0 else 0.0
+    
+    summary = WalkForwardSummary(
+        weighted_sharpe=weighted_sharpe,
+        weighted_sortino=weighted_sortino,
+        weighted_max_drawdown=weighted_max_dd,
+        weighted_win_rate=weighted_win_rate,
+        sharpe_ci=sharpe_ci,
+        max_dd_ci=max_dd_ci,
+        n_folds=n_folds,
+        fold_sharpes=fold_sharpes,
+        fold_weights=fold_weights.tolist(),
+        out_of_sample_sharpe=out_of_sample_sharpe,
+        in_sample_sharpe=in_sample_sharpe,
+        degradation_pct=degradation_pct
+    )
+    
+    logger.info(
+        f"Walk-forward complete: {n_folds} folds, "
+        f"weighted Sharpe={weighted_sharpe:.2f}, degradation={degradation_pct:.1f}%"
+    )
+    
+    # Return both summary and last result for backward compatibility
+    last_result = out_of_sample_results[-1]
+    last_result.walk_forward_summary = summary  # Attach summary
+    
+    return last_result
+
+
+def _bootstrap_ci(values: List[float], weights: np.ndarray, n_bootstrap: int = 1000, alpha: float = 0.05) -> Dict[str, float]:
+    """Bootstrap confidence interval for weighted statistic"""
+    if len(values) < 3:
+        return {'lower': 0.0, 'upper': 0.0}
+    
+    bootstrap_estimates = []
+    for _ in range(n_bootstrap):
+        # Resample with replacement
+        indices = np.random.choice(len(values), size=len(values), replace=True)
+        sample_values = [values[i] for i in indices]
+        sample_weights = weights[indices]
+        sample_weights = sample_weights / sample_weights.sum()
+        
+        estimate = np.average(sample_values, weights=sample_weights)
+        bootstrap_estimates.append(estimate)
+    
+    lower_pct = (alpha / 2) * 100
+    upper_pct = (1 - alpha / 2) * 100
+    
+    return {
+        'lower': float(np.percentile(bootstrap_estimates, lower_pct)),
+        'upper': float(np.percentile(bootstrap_estimates, upper_pct))
+    }

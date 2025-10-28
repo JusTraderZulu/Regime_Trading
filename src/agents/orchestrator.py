@@ -1598,6 +1598,11 @@ def export_signals_node(state: PipelineState) -> Dict:
         transition_median_duration = tm_tier.get('duration', {}).get('median') if tm_tier else None
         transition_entropy = tm_tier.get('matrix', {}).get('entropy') if tm_tier else None
         
+        # NEW: Get transition metric CIs
+        transition_flip_ci = tm_tier.get('flip_density_ci')
+        transition_median_ci = tm_tier.get('median_duration_ci')
+        transition_sample_size = tm_tier.get('sample_size')
+        
         # NEW: Get LLM validation (from dual_llm_research)
         dual_llm = state.get('dual_llm_research', {})
         llm_context_verdict = None
@@ -1673,6 +1678,12 @@ def export_signals_node(state: PipelineState) -> Dict:
             transition_flip_density=transition_flip_density,
             transition_median_duration=transition_median_duration,
             transition_entropy=transition_entropy,
+            # NEW: Transition metric CIs
+            transition_flip_density_ci_lower=transition_flip_ci.get('lower') if transition_flip_ci else None,
+            transition_flip_density_ci_upper=transition_flip_ci.get('upper') if transition_flip_ci else None,
+            transition_median_duration_ci_lower=transition_median_ci.get('lower') if transition_median_ci else None,
+            transition_median_duration_ci_upper=transition_median_ci.get('upper') if transition_median_ci else None,
+            transition_sample_size=transition_sample_size,
             # NEW: LLM validation
             llm_context_verdict=llm_context_verdict,
             llm_analytical_verdict=llm_analytical_verdict,

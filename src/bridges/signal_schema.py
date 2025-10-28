@@ -102,6 +102,28 @@ class SignalRow(BaseModel):
         description="Transition matrix entropy (lower = stickier regimes)"
     )
     
+    # NEW: Transition metric confidence intervals
+    transition_flip_density_ci_lower: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="Flip density CI lower bound (95%)"
+    )
+    transition_flip_density_ci_upper: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="Flip density CI upper bound (95%)"
+    )
+    transition_median_duration_ci_lower: Optional[float] = Field(
+        default=None, ge=0.0,
+        description="Median duration CI lower bound"
+    )
+    transition_median_duration_ci_upper: Optional[float] = Field(
+        default=None, ge=0.0,
+        description="Median duration CI upper bound"
+    )
+    transition_sample_size: Optional[int] = Field(
+        default=None, ge=0,
+        description="Number of bars in transition analysis"
+    )
+    
     # NEW: LLM validation
     llm_context_verdict: Optional[str] = Field(
         default=None,
@@ -224,6 +246,30 @@ class SignalRow(BaseModel):
             "microstructure_bid_ask_spread_bps": f"{self.microstructure_bid_ask_spread_bps:.2f}" if self.microstructure_bid_ask_spread_bps is not None else "",
             "microstructure_ofi_imbalance": f"{self.microstructure_ofi_imbalance:.4f}" if self.microstructure_ofi_imbalance is not None else "",
             "microstructure_microprice": f"{self.microstructure_microprice:.2f}" if self.microstructure_microprice is not None else "",
+            # Transition metrics
+            "transition_flip_density": f"{self.transition_flip_density:.4f}" if self.transition_flip_density is not None else "",
+            "transition_median_duration": f"{self.transition_median_duration:.1f}" if self.transition_median_duration is not None else "",
+            "transition_entropy": f"{self.transition_entropy:.3f}" if self.transition_entropy is not None else "",
+            # Transition CIs
+            "transition_flip_density_ci_lower": f"{self.transition_flip_density_ci_lower:.4f}" if self.transition_flip_density_ci_lower is not None else "",
+            "transition_flip_density_ci_upper": f"{self.transition_flip_density_ci_upper:.4f}" if self.transition_flip_density_ci_upper is not None else "",
+            "transition_median_duration_ci_lower": f"{self.transition_median_duration_ci_lower:.1f}" if self.transition_median_duration_ci_lower is not None else "",
+            "transition_median_duration_ci_upper": f"{self.transition_median_duration_ci_upper:.1f}" if self.transition_median_duration_ci_upper is not None else "",
+            "transition_sample_size": f"{self.transition_sample_size}" if self.transition_sample_size is not None else "",
+            # LLM validation
+            "llm_context_verdict": self.llm_context_verdict or "",
+            "llm_analytical_verdict": self.llm_analytical_verdict or "",
+            "llm_confidence_adjustment": f"{self.llm_confidence_adjustment:.3f}" if self.llm_confidence_adjustment is not None else "",
+            # Forecast
+            "forecast_prob_up": f"{self.forecast_prob_up:.3f}" if self.forecast_prob_up is not None else "",
+            "forecast_expected_return": f"{self.forecast_expected_return:.4f}" if self.forecast_expected_return is not None else "",
+            "forecast_var95": f"{self.forecast_var95:.4f}" if self.forecast_var95 is not None else "",
+            # Action-Outlook
+            "action_conviction": f"{self.action_conviction:.3f}" if self.action_conviction is not None else "",
+            "action_stability": f"{self.action_stability:.3f}" if self.action_stability is not None else "",
+            "action_bias": self.action_bias or "",
+            "action_tactical_mode": self.action_tactical_mode or "",
+            "action_sizing_pct": f"{self.action_sizing_pct:.1f}" if self.action_sizing_pct is not None else "",
         }
     
     class Config:

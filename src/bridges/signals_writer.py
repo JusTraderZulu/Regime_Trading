@@ -40,6 +40,12 @@ CSV_HEADERS = [
     "transition_flip_density",
     "transition_median_duration",
     "transition_entropy",
+    # NEW: Transition metric CIs
+    "transition_flip_density_ci_lower",
+    "transition_flip_density_ci_upper",
+    "transition_median_duration_ci_lower",
+    "transition_median_duration_ci_upper",
+    "transition_sample_size",
     # NEW: LLM validation
     "llm_context_verdict",
     "llm_analytical_verdict",
