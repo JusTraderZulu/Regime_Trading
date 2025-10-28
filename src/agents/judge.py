@@ -32,6 +32,42 @@ def judge_node(state: PipelineState) -> dict:
 
     errors: List[str] = []
     warnings: List[str] = []
+    
+    # Validate data health (if DataAccessManager was used)
+    data_health = state.get("data_health")
+    if data_health:
+        from src.data.manager import DataHealth
+        
+        failed_tiers = []
+        degraded_tiers = []
+        
+        for tier, health in data_health.items():
+            if health == DataHealth.FAILED:
+                failed_tiers.append(tier)
+            elif health in (DataHealth.STALE, DataHealth.FALLBACK):
+                degraded_tiers.append(tier)
+        
+        # Only fail-fast if ALL tiers failed
+        if failed_tiers and len(failed_tiers) == len(data_health):
+            errors.append(
+                f"All data tiers failed ({', '.join(failed_tiers)}): "
+                "Cannot proceed without any data"
+            )
+        elif failed_tiers:
+            # Some tiers failed but not all - record warning
+            warnings.append(
+                f"Data fetch failed for tiers: {', '.join(failed_tiers)} "
+                "(analysis may be incomplete)"
+            )
+        
+        # Record warnings for degraded data
+        if degraded_tiers:
+            warnings.append(
+                f"Using cached/stale data for tiers: {', '.join(degraded_tiers)} "
+                "(signals may be based on outdated market conditions)"
+            )
+        
+        logger.info(f"Data health check: {len(failed_tiers)} failed, {len(degraded_tiers)} degraded")
 
     # Validate features
     for tier in ["lt", "mt", "st"]:

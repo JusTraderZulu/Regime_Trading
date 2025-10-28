@@ -460,3 +460,28 @@ qc:
   auto_submit: false  # Disable QC auto-submit for now (set true when ready)
   wait_for_results: false  # Set to true to wait (adds 5-10 min), false to run in background
   timeout_seconds: 300  # Max wait time if wait_for_results = true
+
+# =============================================================================
+# Data Pipeline Configuration (Retry, Fallback, Second Aggregates)
+# =============================================================================
+data_pipeline:
+  enabled: true  # Enable DataAccessManager for testing
+  
+  # Retry configuration with exponential backoff
+  retry:
+    max_tries: 3          # Maximum retry attempts
+    max_time: 30          # Maximum time (seconds) for all retries
+    base_delay: 1         # Base delay (seconds) between retries
+    max_delay: 10         # Maximum delay (seconds) between retries
+  
+  # Fallback configuration for graceful degradation
+  fallback:
+    allow_stale_cache: true    # Allow using cached data when API fails
+    max_age_hours: 24          # Maximum age (hours) of cached data to use
+  
+  # Second-aggregate utilization (Polygon second-level data)
+  second_aggs:
+    enabled: false             # Enable second-level aggregates (default: false)
+    asset_classes:             # Which asset classes support second aggs
+      - equities               # Equities support second-level data
+    # Note: crypto and forex use minute bars, not second bars

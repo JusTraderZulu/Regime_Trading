@@ -42,6 +42,7 @@ from src.core.progress import track_node
 from src.bridges.symbol_map import parse_symbol_info
 from src.tools.backtest import backtest, walk_forward_analysis, test_multiple_strategies
 from src.tools.data_loaders import get_polygon_bars, fetch_quotes_data, get_alpaca_bars
+from src.data.manager import DataAccessManager, DataHealth
 from src.tools.features import compute_feature_bundle
 from src.tools.levels import compute_technical_levels
 from src.tools.events import active_events, load_macro_events
@@ -385,6 +386,7 @@ def load_data_node(state: PipelineState) -> Dict:
 
     Writes:
         - data_lt, data_mt, data_st
+        - data_health (dict of tier -> DataHealth status)
     """
     progress = state.get("progress")
     
@@ -407,6 +409,14 @@ def load_data_node(state: PipelineState) -> Dict:
 
         results["asset_class"] = asset_class
         results["venue"] = venue
+        
+        # Initialize DataAccessManager if enabled (non-breaking shim)
+        data_pipeline_cfg = config.get("data_pipeline", {})
+        use_data_manager = data_pipeline_cfg.get("enabled", False)
+        data_manager = DataAccessManager() if use_data_manager else None
+        
+        # Track data health status per tier
+        data_health = {}
 
         for tier_str in active_tiers:
             tier_key = tier_str.lower()
@@ -424,66 +434,88 @@ def load_data_node(state: PipelineState) -> Dict:
                 logger.info(f"ST bar overridden to {bar}")
 
             try:
-                # Data source strategy:
-                # - Check if equities configured to use Polygon (upgraded subscription)
-                # - Otherwise use Alpaca for equities (free tier)
-                # - Always use Polygon for crypto/forex (paid plan)
-                
-                equity_data_source_cfg = equities_cfg.get("data_source", {})
-                use_polygon_for_equities = equity_data_source_cfg.get("provider") == "polygon"
-                
-                if asset_class == "EQUITY" and use_polygon_for_equities:
-                    # Use Polygon for equities (Starter+ subscription with full intraday)
-                    logger.info(f"Using Polygon for equity data ({bar})")
-                    df = get_polygon_bars(symbol, bar, lookback_days=lookback)
-                    df = _align_to_sessions(df, bar)
-                    results[f"data_{tier_key}"] = df
-                    logger.info(f"Loaded {len(df)} Polygon bars for {tier_str} ({bar})")
-                elif asset_class == "EQUITY" and equity_provider == "alpaca":
-                    # Use Alpaca for equities (fallback or free tier)
-                    df, meta = get_alpaca_bars(
-                        symbol=qc_symbol,
+                # Use DataAccessManager if enabled, otherwise fall back to direct loaders
+                if data_manager:
+                    # New path: Use centralized manager with retry & fallback
+                    df, health = data_manager.get_bars(
+                        symbol=symbol,
+                        tier=tier_str,
+                        asset_class=asset_class,
                         bar=bar,
-                        lookback_days=lookback,
-                        include_premarket=equities_cfg.get("include_premarket", False),
-                        include_postmarket=equities_cfg.get("include_postmarket", False),
-                        tz=equities_cfg.get("tz", "America/New_York"),
-                        adjustment=equities_cfg.get("adjustment", "all"),
-                        feed=equity_feed,
+                        lookback_days=lookback
                     )
-                    df = _align_to_sessions(df, bar)
-                    results[f"data_{tier_key}"] = df
-                    meta.update({"feed": equity_feed, "tier": tier_str})
-                    equity_meta[tier_str] = meta
-                    logger.info(f"Loaded {len(df)} Alpaca bars for {tier_str} ({bar})")
+                    data_health[tier_str] = health
+                    
+                    if df is not None:
+                        df = _align_to_sessions(df, bar)
+                        results[f"data_{tier_key}"] = df
+                        status_emoji = "✅" if health == DataHealth.FRESH else "⚠️"
+                        logger.info(
+                            f"{status_emoji} Loaded {len(df)} bars for {tier_str} "
+                            f"({bar}, health: {health.value})"
+                        )
+                    else:
+                        logger.error(f"Failed to load data for {tier_str} (health: {health.value})")
+                        results[f"data_{tier_key}"] = None
                 else:
-                    # Crypto/Forex always use Polygon (paid plan with full historical depth)
-                    df = get_polygon_bars(symbol, bar, lookback_days=lookback)
-                    df = _align_to_sessions(df, bar)
-                    results[f"data_{tier_key}"] = df
-                    logger.info(f"Loaded {len(df)} Polygon bars for {tier_str} ({bar})")
+                    # Legacy path: Direct loader calls (existing behaviour)
+                    equity_data_source_cfg = equities_cfg.get("data_source", {})
+                    use_polygon_for_equities = equity_data_source_cfg.get("provider") == "polygon"
+                    
+                    if asset_class == "EQUITY" and use_polygon_for_equities:
+                        # Use Polygon for equities (Starter+ subscription with full intraday)
+                        logger.info(f"Using Polygon for equity data ({bar})")
+                        df = get_polygon_bars(symbol, bar, lookback_days=lookback)
+                        df = _align_to_sessions(df, bar)
+                        results[f"data_{tier_key}"] = df
+                        logger.info(f"Loaded {len(df)} Polygon bars for {tier_str} ({bar})")
+                    elif asset_class == "EQUITY" and equity_provider == "alpaca":
+                        # Use Alpaca for equities (fallback or free tier)
+                        df, meta = get_alpaca_bars(
+                            symbol=qc_symbol,
+                            bar=bar,
+                            lookback_days=lookback,
+                            include_premarket=equities_cfg.get("include_premarket", False),
+                            include_postmarket=equities_cfg.get("include_postmarket", False),
+                            tz=equities_cfg.get("tz", "America/New_York"),
+                            adjustment=equities_cfg.get("adjustment", "all"),
+                            feed=equity_feed,
+                        )
+                        df = _align_to_sessions(df, bar)
+                        results[f"data_{tier_key}"] = df
+                        meta.update({"feed": equity_feed, "tier": tier_str})
+                        equity_meta[tier_str] = meta
+                        logger.info(f"Loaded {len(df)} Alpaca bars for {tier_str} ({bar})")
+                    else:
+                        # Crypto/Forex always use Polygon (paid plan with full historical depth)
+                        df = get_polygon_bars(symbol, bar, lookback_days=lookback)
+                        df = _align_to_sessions(df, bar)
+                        results[f"data_{tier_key}"] = df
+                        logger.info(f"Loaded {len(df)} Polygon bars for {tier_str} ({bar})")
 
-                    # Also fetch quotes data for microstructure analysis (for crypto)
-                    if asset_class == "CRYPTO" and symbol.startswith('X:'):
-                        try:
-                            end_date = datetime.now().strftime('%Y-%m-%d')
-                            start_date = (datetime.now() - timedelta(days=min(lookback, 7))).strftime('%Y-%m-%d')
+                        # Also fetch quotes data for microstructure analysis (for crypto)
+                        if asset_class == "CRYPTO" and symbol.startswith('X:'):
+                            try:
+                                end_date = datetime.now().strftime('%Y-%m-%d')
+                                start_date = (datetime.now() - timedelta(days=min(lookback, 7))).strftime('%Y-%m-%d')
 
-                            quotes_df = fetch_quotes_data(symbol, start_date, end_date)
-                            if not quotes_df.empty:
-                                quotes_dir = Path("data") / "quotes"
-                                quotes_dir.mkdir(exist_ok=True)
-                                quotes_file = quotes_dir / f"{symbol.replace(':', '_')}_quotes_{end_date}.parquet"
-                                quotes_df.to_parquet(quotes_file)
-                                logger.info(f"✅ Saved {len(quotes_df)} quotes for microstructure analysis")
-                            else:
-                                logger.info("No quotes data available for microstructure analysis")
-                        except Exception as quote_exc:
-                            logger.warning(f"Failed to fetch quotes data: {quote_exc}")
+                                quotes_df = fetch_quotes_data(symbol, start_date, end_date)
+                                if not quotes_df.empty:
+                                    quotes_dir = Path("data") / "quotes"
+                                    quotes_dir.mkdir(exist_ok=True)
+                                    quotes_file = quotes_dir / f"{symbol.replace(':', '_')}_quotes_{end_date}.parquet"
+                                    quotes_df.to_parquet(quotes_file)
+                                    logger.info(f"✅ Saved {len(quotes_df)} quotes for microstructure analysis")
+                                else:
+                                    logger.info("No quotes data available for microstructure analysis")
+                            except Exception as quote_exc:
+                                logger.warning(f"Failed to fetch quotes data: {quote_exc}")
 
             except Exception as exc:
                 logger.error(f"Failed to load data for {tier_str}: {exc}")
                 results[f"data_{tier_key}"] = None
+                if data_manager:
+                    data_health[tier_str] = DataHealth.FAILED
 
         # 1m execution buffer (no analysis, execution checks only)
         exec_buffer_cfg = config.get("execution_buffer")
@@ -524,6 +556,11 @@ def load_data_node(state: PipelineState) -> Dict:
                 "tiers": equity_meta,
             }
             results["equity_meta"] = meta_payload
+        
+        # Add data health status if using manager
+        if data_health:
+            results["data_health"] = data_health
+            logger.info(f"Data health summary: {dict(data_health)}")
 
         return results
 

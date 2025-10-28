@@ -1152,6 +1152,71 @@ def summarizer_node(state: PipelineState) -> dict:
                 summary_md += "\n" + "\n".join(rows2) + "\n"
     except Exception as exc:
         logger.debug(f"Transition metrics section skipped: {exc}")
+    
+    # Append Data Health section if present (from DataAccessManager)
+    try:
+        data_health = state.get("data_health")
+        if data_health:
+            from src.data.manager import DataHealth
+            
+            health_lines = ["", "## Data Health Status", ""]
+            
+            # Check if any tier has degraded health
+            has_issues = any(
+                health in (DataHealth.STALE, DataHealth.FALLBACK, DataHealth.FAILED)
+                for health in data_health.values()
+            )
+            
+            if has_issues:
+                health_lines.append("⚠️ **Warning**: Some data sources experienced issues")
+                health_lines.append("")
+            
+            # Table of health status
+            health_lines.extend([
+                "Tier | Status | Description",
+                "---- | ------ | -----------"
+            ])
+            
+            for tier_name in ["LT", "MT", "ST", "US"]:
+                health = data_health.get(tier_name)
+                if health:
+                    status_map = {
+                        DataHealth.FRESH: ("✅ Fresh", "Data fetched successfully from API"),
+                        DataHealth.STALE: ("⚠️ Stale", "Using cached data (API temporarily unavailable)"),
+                        DataHealth.FALLBACK: ("⚠️ Fallback", "Using last-good cache (API failed, cached data may be outdated)"),
+                        DataHealth.FAILED: ("❌ Failed", "No data available (API failed, no cache)")
+                    }
+                    emoji_status, description = status_map.get(health, ("❓ Unknown", "Status unknown"))
+                    health_lines.append(f"{tier_name} | {emoji_status} | {description}")
+            
+            health_lines.append("")
+            
+            # Add interpretation if there are fallbacks or failures
+            if has_issues:
+                health_lines.append("**Impact:**")
+                
+                failed_tiers = [
+                    tier for tier, health in data_health.items()
+                    if health == DataHealth.FAILED
+                ]
+                fallback_tiers = [
+                    tier for tier, health in data_health.items()
+                    if health in (DataHealth.STALE, DataHealth.FALLBACK)
+                ]
+                
+                if failed_tiers:
+                    health_lines.append(f"- **Failed tiers** ({', '.join(failed_tiers)}): Analysis incomplete for these timeframes")
+                
+                if fallback_tiers:
+                    health_lines.append(f"- **Degraded tiers** ({', '.join(fallback_tiers)}): Using cached data, signals may be based on slightly outdated market conditions")
+                    health_lines.append("- **Recommendation**: Re-run analysis when API is available for fresh data")
+                
+                health_lines.append("")
+            
+            summary_md += "\n" + "\n".join(health_lines)
+            logger.info(f"Added data health section (issues: {has_issues})")
+    except Exception as exc:
+        logger.debug(f"Data health section skipped: {exc}")
 
     try:
         artifacts_path = Path(artifacts_dir)

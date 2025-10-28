@@ -1,0 +1,11 @@
+# Major S&P 500 Equities
+SPY
+QQQ
+AAPL
+MSFT
+NVDA
+TSLA
+GOOGL
+AMZN
+META
+JPM

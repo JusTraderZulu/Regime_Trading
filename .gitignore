@@ -1,6 +1,9 @@
 # API Keys and Secrets (CRITICAL - DO NOT COMMIT)
 *.txt
 !requirements.txt
+
+# Universe files should be committed (they're configuration, not secrets)
+!universes/*.txt
 polygon_key.txt
 open_ai.txt
 hugging_face.txt
