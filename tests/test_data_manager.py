@@ -52,7 +52,7 @@ class TestDataAccessManager:
         })
         
         with patch.object(manager.polygon_loader, 'get_bars', return_value=sample_df):
-            df, health = manager.get_bars(
+            df, health, provenance = manager.get_bars(
                 symbol='X:BTCUSD',
                 tier='MT',
                 asset_class='crypto',
@@ -63,6 +63,7 @@ class TestDataAccessManager:
             assert df is not None
             assert len(df) == 3
             assert health == DataHealth.FRESH
+            assert provenance is not None
             assert manager.health_status['X:BTCUSD_MT_1h'] == DataHealth.FRESH
     
     def test_api_failure_fallback_to_cache(self, manager, tmp_path):
@@ -79,7 +80,7 @@ class TestDataAccessManager:
         
         # Mock API failure
         with patch.object(manager.polygon_loader, 'get_bars', side_effect=Exception("API Error")):
-            df, health = manager.get_bars(
+            df, health, provenance = manager.get_bars(
                 symbol='X:BTCUSD',
                 tier='MT',
                 asset_class='crypto',
@@ -90,12 +91,13 @@ class TestDataAccessManager:
             assert df is not None
             assert len(df) == 3
             assert health == DataHealth.FALLBACK
+            assert provenance is not None
             assert manager.health_status[cache_key] == DataHealth.FALLBACK
     
     def test_api_failure_no_cache(self, manager):
         """Test FAILED status when API fails and no cache exists"""
         with patch.object(manager.polygon_loader, 'get_bars', side_effect=Exception("API Error")):
-            df, health = manager.get_bars(
+            df, health, provenance = manager.get_bars(
                 symbol='X:BTCUSD',
                 tier='MT',
                 asset_class='crypto',
@@ -105,6 +107,7 @@ class TestDataAccessManager:
             
             assert df is None
             assert health == DataHealth.FAILED
+            assert provenance is None
             assert manager.health_status['X:BTCUSD_MT_1h'] == DataHealth.FAILED
     
     def test_stale_cache_rejected(self, manager):
@@ -124,7 +127,7 @@ class TestDataAccessManager:
         
         # Mock API failure
         with patch.object(manager.polygon_loader, 'get_bars', side_effect=Exception("API Error")):
-            df, health = manager.get_bars(
+            df, health, provenance = manager.get_bars(
                 symbol='X:BTCUSD',
                 tier='MT',
                 asset_class='crypto',
@@ -134,6 +137,7 @@ class TestDataAccessManager:
             
             assert df is None
             assert health == DataHealth.FAILED
+            assert provenance is None
     
     def test_health_summary(self, manager):
         """Test health summary generation"""
@@ -165,7 +169,7 @@ class TestDataAccessManager:
             return pd.DataFrame({'close': [100], 'volume': [1000]})
         
         with patch.object(manager.polygon_loader, 'get_bars', side_effect=failing_then_success):
-            df, health = manager.get_bars(
+            df, health, provenance = manager.get_bars(
                 symbol='X:BTCUSD',
                 tier='MT',
                 asset_class='crypto',
@@ -175,6 +179,7 @@ class TestDataAccessManager:
             
             assert df is not None
             assert health == DataHealth.FRESH
+            assert provenance is not None
             assert call_count == 2  # Failed once, then succeeded
     
     def test_cache_save_on_success(self, manager):
@@ -182,7 +187,7 @@ class TestDataAccessManager:
         sample_df = pd.DataFrame({'close': [100, 101], 'volume': [1000, 1100]})
         
         with patch.object(manager.polygon_loader, 'get_bars', return_value=sample_df):
-            df, health = manager.get_bars(
+            df, health, provenance = manager.get_bars(
                 symbol='X:BTCUSD',
                 tier='MT',
                 asset_class='crypto',
@@ -208,7 +213,7 @@ class TestDataManagerIntegration:
         """Test actual Polygon API fetch with retry logic"""
         manager = DataAccessManager()
         
-        df, health = manager.get_bars(
+        df, health, provenance = manager.get_bars(
             symbol='X:BTCUSD',
             tier='MT',
             asset_class='crypto',
@@ -218,5 +223,6 @@ class TestDataManagerIntegration:
         
         assert df is not None
         assert health == DataHealth.FRESH
+        assert provenance is not None
         assert len(df) > 0
 

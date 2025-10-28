@@ -437,7 +437,7 @@ def load_data_node(state: PipelineState) -> Dict:
                 # Use DataAccessManager if enabled, otherwise fall back to direct loaders
                 if data_manager:
                     # New path: Use centralized manager with retry & fallback
-                    df, health = data_manager.get_bars(
+                    df, health, provenance = data_manager.get_bars(
                         symbol=symbol,
                         tier=tier_str,
                         asset_class=asset_class,
@@ -450,10 +450,23 @@ def load_data_node(state: PipelineState) -> Dict:
                         df = _align_to_sessions(df, bar)
                         results[f"data_{tier_key}"] = df
                         status_emoji = "✅" if health == DataHealth.FRESH else "⚠️"
-                        logger.info(
-                            f"{status_emoji} Loaded {len(df)} bars for {tier_str} "
-                            f"({bar}, health: {health.value})"
-                        )
+                        
+                        # Log with provenance info
+                        if provenance:
+                            agg_note = " (aggregated from seconds)" if provenance.aggregated else ""
+                            logger.info(
+                                f"{status_emoji} Loaded {len(df)} bars for {tier_str} "
+                                f"({bar}, health: {health.value}, source: {provenance.source}{agg_note})"
+                            )
+                            # Store provenance in state for downstream use
+                            if 'data_provenance' not in results:
+                                results['data_provenance'] = {}
+                            results['data_provenance'][tier_str] = provenance.to_dict()
+                        else:
+                            logger.info(
+                                f"{status_emoji} Loaded {len(df)} bars for {tier_str} "
+                                f"({bar}, health: {health.value})"
+                            )
                     else:
                         logger.error(f"Failed to load data for {tier_str} (health: {health.value})")
                         results[f"data_{tier_key}"] = None

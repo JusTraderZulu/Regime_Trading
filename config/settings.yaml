@@ -485,3 +485,28 @@ data_pipeline:
     asset_classes:             # Which asset classes support second aggs
       - equities               # Equities support second-level data
     # Note: crypto and forex use minute bars, not second bars
+    
+    # Per-tier configuration
+    tiers:
+      LT:
+        enabled: false         # Daily bars don't need seconds
+        min_bars: 100          # Minimum bars to consider using seconds
+        fallback_to_minute: true  # Fall back to minute if seconds unavailable
+      MT:
+        enabled: true          # 1h/4h benefit from seconds
+        min_bars: 50
+        fallback_to_minute: true
+      ST:
+        enabled: true          # 15m benefits most from seconds
+        min_bars: 100
+        fallback_to_minute: true
+      US:
+        enabled: true          # 5m/1m can use seconds
+        min_bars: 100
+        fallback_to_minute: true
+    
+    # Aggregation settings
+    aggregation:
+      chunk_days: 7            # Process seconds in chunks to manage memory
+      cache_aggregated: true   # Cache minute-aggregated results
+      max_seconds_lookback: 30 # Max days of second data to fetch

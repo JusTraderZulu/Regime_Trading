@@ -22,7 +22,8 @@ def fetch_bars_for_scanner(
     """
     Fetch multiple timeframes for a single symbol (synchronous).
     
-    Uses existing data loaders with caching.
+    Uses DataAccessManager for enhanced reliability (when enabled),
+    otherwise falls back to direct loaders.
     
     Args:
         symbol: Asset symbol
@@ -34,6 +35,7 @@ def fetch_bars_for_scanner(
     """
     from src.tools.data_loaders import get_polygon_bars, get_alpaca_bars
     from src.bridges.symbol_map import parse_symbol_info
+    from src.core.utils import load_config
     
     result = {}
     
@@ -41,11 +43,42 @@ def fetch_bars_for_scanner(
         # Determine data source
         _, asset_class, _ = parse_symbol_info(symbol)
         
-        # Check if equities should use Polygon (requires upgraded subscription)
-        from src.core.utils import load_config
+        # Load config
         config = load_config('config/settings.yaml')
         equity_cfg = config.get('equities', {})
         equity_data_source = equity_cfg.get('data_source', {}).get('provider', 'alpaca')
+        
+        # Check if DataAccessManager should be used
+        data_pipeline_cfg = config.get('data_pipeline', {})
+        use_manager = data_pipeline_cfg.get('enabled', False)
+        
+        if use_manager:
+            # Use DataAccessManager for enhanced reliability and second aggs
+            from src.data.manager import DataAccessManager
+            manager = DataAccessManager()
+            
+            for tf in timeframes:
+                # Map timeframe to tier (best guess for scanner)
+                tier_map = {'1d': 'LT', '4h': 'MT', '1h': 'MT', '15m': 'ST', '5m': 'US', '1m': 'US'}
+                tier = tier_map.get(tf, 'ST')
+                
+                df, health, provenance = manager.get_bars(
+                    symbol=symbol,
+                    tier=tier,
+                    asset_class=asset_class,
+                    bar=tf,
+                    lookback_days=lookback_bars
+                )
+                
+                if df is not None and not df.empty:
+                    result[tf] = df
+                    source_note = f" ({provenance.source})" if provenance else ""
+                    logger.debug(f"Scanner: {symbol} {tf} - {len(df)} bars{source_note}")
+                else:
+                    result[tf] = None
+                    logger.warning(f"Scanner: Failed to fetch {symbol} {tf}")
+            
+            return result
         
         for tf in timeframes:
             try:

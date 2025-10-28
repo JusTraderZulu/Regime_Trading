@@ -1156,29 +1156,45 @@ def summarizer_node(state: PipelineState) -> dict:
     # Append Data Health section if present (from DataAccessManager)
     try:
         data_health = state.get("data_health")
+        data_provenance = state.get("data_provenance")
+        
         if data_health:
             from src.data.manager import DataHealth
             
             health_lines = ["", "## Data Health Status", ""]
             
-            # Check if any tier has degraded health
+            # Check if any tier has degraded health or uses second aggregates
             has_issues = any(
                 health in (DataHealth.STALE, DataHealth.FALLBACK, DataHealth.FAILED)
                 for health in data_health.values()
             )
             
+            # Check for second aggregate usage
+            has_second_aggs = False
+            if data_provenance:
+                has_second_aggs = any(
+                    prov.get('aggregated', False)
+                    for prov in data_provenance.values()
+                )
+            
             if has_issues:
                 health_lines.append("⚠️ **Warning**: Some data sources experienced issues")
                 health_lines.append("")
             
-            # Table of health status
+            if has_second_aggs:
+                health_lines.append("ℹ️ **Info**: Some tiers use second-level aggregates (synthesized from Polygon second data)")
+                health_lines.append("")
+            
+            # Table of health status with provenance
             health_lines.extend([
-                "Tier | Status | Description",
-                "---- | ------ | -----------"
+                "Tier | Status | Source | Description",
+                "---- | ------ | ------ | -----------"
             ])
             
             for tier_name in ["LT", "MT", "ST", "US"]:
                 health = data_health.get(tier_name)
+                prov = data_provenance.get(tier_name) if data_provenance else None
+                
                 if health:
                     status_map = {
                         DataHealth.FRESH: ("✅ Fresh", "Data fetched successfully from API"),
@@ -1187,7 +1203,16 @@ def summarizer_node(state: PipelineState) -> dict:
                         DataHealth.FAILED: ("❌ Failed", "No data available (API failed, no cache)")
                     }
                     emoji_status, description = status_map.get(health, ("❓ Unknown", "Status unknown"))
-                    health_lines.append(f"{tier_name} | {emoji_status} | {description}")
+                    
+                    # Add source and aggregation info from provenance
+                    source = "unknown"
+                    if prov:
+                        source = prov.get('source', 'unknown')
+                        if prov.get('aggregated'):
+                            source += " (agg)"
+                            description += " - Aggregated from second-level data"
+                    
+                    health_lines.append(f"{tier_name} | {emoji_status} | {source} | {description}")
             
             health_lines.append("")
             
@@ -1213,8 +1238,29 @@ def summarizer_node(state: PipelineState) -> dict:
                 
                 health_lines.append("")
             
+            # Add note about second aggregates if used
+            if has_second_aggs and data_provenance:
+                agg_tiers = [
+                    tier for tier, prov in data_provenance.items()
+                    if prov.get('aggregated', False)
+                ]
+                
+                if agg_tiers:
+                    health_lines.append("**Second-Level Data:**")
+                    health_lines.append(
+                        f"- **Tiers using synthesized data** ({', '.join(agg_tiers)}): "
+                        "Data aggregated from Polygon second-level bars for higher accuracy"
+                    )
+                    health_lines.append(
+                        "- **Benefit**: More precise OHLCV data, especially for intraday analysis"
+                    )
+                    health_lines.append(
+                        "- **Note**: Requires Polygon Starter+ subscription for second-level access"
+                    )
+                    health_lines.append("")
+            
             summary_md += "\n" + "\n".join(health_lines)
-            logger.info(f"Added data health section (issues: {has_issues})")
+            logger.info(f"Added data health section (issues: {has_issues}, second_aggs: {has_second_aggs})")
     except Exception as exc:
         logger.debug(f"Data health section skipped: {exc}")
 
