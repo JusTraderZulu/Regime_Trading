@@ -1053,8 +1053,8 @@ def summarizer_node(state: PipelineState) -> dict:
         tm_state = state.get("transition_metrics") if isinstance(state, dict) else None
         rows = [
             "## Regime Transition Metrics",
-            "Tier | Window | Flip Density | Median Dur | Entropy | Sigma Post/Pre | Alerts",
-            "---- | ------ | ------------ | ---------- | ------- | -------------- | ------",
+            "Tier | Window | Flip Density (95% CI) | Median Dur (95% CI) | Entropy (95% CI) | Sigma Post/Pre | Alerts",
+            "---- | ------ | --------------------- | ------------------- | ---------------- | -------------- | ------",
         ]
         wrote_any = False
         if tm_state:
@@ -1068,11 +1068,30 @@ def summarizer_node(state: PipelineState) -> dict:
                 sigma_ratio = float(snap.get("sigma_around_flip_ratio", 1.0))
                 window = int(snap.get("window_bars", 0))
                 alerts = ",".join(snap.get("alerts", []) or []) or "-"
+                
+                # Get CIs if available
+                flip_ci = snap.get("flip_density_ci")
+                median_ci = snap.get("median_duration_ci")
+                entropy_ci = snap.get("entropy_ci")
+                
                 if window <= 0:
                     rows.append(f"{tier_name} | 0 | collecting… | collecting… | collecting… | collecting… | -")
                 else:
+                    # Format with CIs if available
+                    flip_str = f"{flip_density:.3f}"
+                    if flip_ci:
+                        flip_str += f" ({flip_ci.get('lower', 0):.3f}-{flip_ci.get('upper', 0):.3f})"
+                    
+                    median_str = f"{median_dur:.0f}"
+                    if median_ci:
+                        median_str += f" ({median_ci.get('lower', 0):.0f}-{median_ci.get('upper', 0):.0f})"
+                    
+                    entropy_str = f"{entropy:.2f}"
+                    if entropy_ci:
+                        entropy_str += f" ({entropy_ci.get('lower', 0):.2f}-{entropy_ci.get('upper', 0):.2f})"
+                    
                     rows.append(
-                        f"{tier_name} | {window} | {flip_density:.3f} | {median_dur:.0f} | {entropy:.2f} | {sigma_ratio:.2f} | {alerts}"
+                        f"{tier_name} | {window} | {flip_str} | {median_str} | {entropy_str} | {sigma_ratio:.2f} | {alerts}"
                     )
                 wrote_any = True
         # Fallback to on-disk snapshots
@@ -1133,6 +1152,16 @@ def summarizer_node(state: PipelineState) -> dict:
                 if median_d > 0 and flip_d > 0:
                     expected_remaining = int(median_d * 0.5)  # Rough estimate
                     interp_lines.append(f"- **Trading Implication**: Current regime likely stable for {expected_remaining}-{median_d:.0f} more bars; monitor for flip signals")
+                
+                # Interpret confidence intervals if available
+                flip_ci = tm_mt.get("flip_density_ci")
+                median_ci = tm_mt.get("median_duration_ci")
+                sample_size = tm_mt.get("sample_size")
+                
+                if flip_ci and sample_size:
+                    ci_width = flip_ci.get('upper', 0) - flip_ci.get('lower', 0)
+                    precision = "precise" if ci_width < 0.05 else ("moderate" if ci_width < 0.10 else "uncertain")
+                    interp_lines.append(f"- **Statistical Confidence**: Flip density CI width {ci_width:.1%} indicates {precision} estimate (n={sample_size} bars)")
             
             summary_md += "\n" + "\n".join(interp_lines) + "\n"
 

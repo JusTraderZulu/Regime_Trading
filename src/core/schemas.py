@@ -566,6 +566,33 @@ class BacktestResult(BaseModel):
 # ============================================================================
 
 
+class WalkForwardSummary(BaseModel):
+    """Walk-forward validation summary with weighted aggregation"""
+    
+    # Aggregated metrics
+    weighted_sharpe: float
+    weighted_sortino: float
+    weighted_max_drawdown: float
+    weighted_win_rate: float
+    
+    # Confidence intervals (bootstrap)
+    sharpe_ci: Optional[Dict[str, float]] = None  # {'lower': X, 'upper': Y}
+    max_dd_ci: Optional[Dict[str, float]] = None
+    
+    # Individual fold results
+    n_folds: int
+    fold_sharpes: List[float]
+    fold_weights: List[float]  # Importance weights for each fold
+    
+    # Validation metrics
+    out_of_sample_sharpe: float
+    in_sample_sharpe: float
+    degradation_pct: float  # (IS - OOS) / IS
+    
+    class Config:
+        arbitrary_types_allowed = True
+
+
 class ContradictorReport(BaseModel):
     """Output of Contradictor Agent - red-team analysis"""
 
