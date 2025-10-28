@@ -246,10 +246,14 @@ class PolygonDataLoader:
         return freq_map.get(bar)
 
     def _parse_bar(self, bar: str) -> tuple[int, str]:
-        """Parse bar string (e.g., '15m', '1h', '1d') into multiplier and timespan"""
+        """Parse bar string (e.g., '1s', '15m', '1h', '1d') into multiplier and timespan"""
         bar = bar.lower().strip()
 
-        if bar.endswith("m") or bar.endswith("min"):
+        if bar.endswith("s") or bar.endswith("sec"):
+            # Second bars (e.g., '1s')
+            multiplier = int(bar.rstrip("sec"))
+            return multiplier, "second"
+        elif bar.endswith("m") or bar.endswith("min"):
             multiplier = int(bar.rstrip("min"))
             return multiplier, "minute"
         elif bar.endswith("h") or bar.endswith("hour"):

@@ -6,7 +6,7 @@ Strategies are mapped from regime classifications.
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 
 import matplotlib
 import matplotlib.pyplot as plt

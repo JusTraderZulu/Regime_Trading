@@ -256,7 +256,7 @@ class DataAccessManager:
         Determine if second-level aggregates should be used.
         
         Args:
-            asset_class: Asset class
+            asset_class: Asset class (will be normalized to lowercase)
             tier: Tier name
             bar: Bar size
             
@@ -269,9 +269,17 @@ class DataAccessManager:
         if not second_cfg.get('enabled', False):
             return False
         
+        # Normalize asset class to lowercase for comparison
+        # Orchestrator passes "EQUITY"/"CRYPTO", config has "equities"/"crypto"
+        asset_class_normalized = asset_class.lower()
+        if asset_class_normalized == 'equity':
+            asset_class_normalized = 'equities'
+        elif asset_class_normalized == 'fx':
+            asset_class_normalized = 'forex'
+        
         # Check if asset class supports seconds
         supported_classes = second_cfg.get('asset_classes', [])
-        if asset_class not in supported_classes:
+        if asset_class_normalized not in supported_classes:
             return False
         
         # Check tier-specific config
