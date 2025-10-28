@@ -466,7 +466,7 @@ qc:
 # =============================================================================
 risk:
   volatility_targeting:
-    enabled: false              # Enable volatility-targeted allocation
+    enabled: true               # Enable volatility-targeted allocation
     target_volatility: 0.15     # Target portfolio volatility (15% annualized)
     lookback_days: 30           # Days for covariance estimation
     min_observations: 20        # Minimum bars required for reliable estimation
@@ -494,8 +494,10 @@ data_pipeline:
     max_age_hours: 24          # Maximum age (hours) of cached data to use
   
   # Second-aggregate utilization (Polygon second-level data)
+  # NOTE: Disabled by default - Polygon already has native 15m, 5m, 1m bars
+  # Enable this when you want ADDITIONAL second-level analysis (volatility shifts, order flow)
   second_aggs:
-    enabled: false             # Enable second-level aggregates (default: false)
+    enabled: false             # Use native Polygon bars (15m, 5m, 1m) - faster
     asset_classes:             # Which asset classes support second aggs
       - equities               # Equities support second-level data
     # Note: crypto and forex use minute bars, not second bars
