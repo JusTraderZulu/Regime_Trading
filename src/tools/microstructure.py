@@ -593,7 +593,7 @@ def fetch_crypto_quotes(symbol: str, start_date: str, end_date: str, api_key: st
     return pd.DataFrame()
 
 
-def create_microstructure_features(df: pd.DataFrame, config: Dict, tier: Tier, symbol: str, use_enhanced: bool = False) -> MicrostructureFeatures:
+def create_microstructure_features(df: pd.DataFrame, config: Dict, tier: Tier, symbol: str, use_enhanced: bool = False, second_level_data: Optional[Dict] = None) -> MicrostructureFeatures:
     """
     Create microstructure features with proper Pydantic schema.
     Now enhanced with quotes-based analysis when available.

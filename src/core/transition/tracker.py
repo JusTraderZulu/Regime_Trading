@@ -127,11 +127,11 @@ class TransitionTracker:
 		Returns:
 			Dict with 'lower' and 'upper' bounds
 		"""
-		if not self._runs:
+		if not self.runs:
 			return {'lower': 0.0, 'upper': 0.0}
 		
 		# Get run durations
-		durations = [run[2] for run in self._runs]  # run = (start, end, length, label)
+		durations = [run[3] for run in self.runs]  # run = (label, start, end, length)
 		
 		# Bootstrap resampling
 		medians = []
@@ -230,9 +230,9 @@ class TransitionTracker:
 			# Wilson interval for flip density (binomial proportion)
 			flip_density_ci = self._wilson_interval(n_transitions, sample_size)
 			
-			# Bootstrap CI for median duration
-			if len(self._runs) >= 10:  # Need enough runs for bootstrap
-				median_duration_ci = self._bootstrap_median_duration_ci()
+		# Bootstrap CI for median duration
+		if len(self.runs) >= 10:  # Need enough runs for bootstrap
+			median_duration_ci = self._bootstrap_median_duration_ci()
 			
 			# Bootstrap CI for entropy
 			if len(self.labels) >= 30:  # Need enough data
