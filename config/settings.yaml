@@ -45,8 +45,8 @@ symbols:
   - USD-CAD
 
 data_source:
-  equities: "alpaca"
-  equities_feed: "iex"
+  equities: "polygon"  # Use Polygon for all assets (has second data!)
+  equities_feed: "polygon"
   crypto_fx: "polygon"
 
 # Timeframe definitions (tier-based)
@@ -69,9 +69,10 @@ timeframes:
     min_samples: 300
 
 # Execution-only microstructure buffer
-execution_buffer:
-  bar: "1m"
-  lookback: 3   # 72 hours for liquidity/spread checks
+# Execution buffer disabled - not needed for regime analysis
+# execution_buffer:
+#   bar: "1m"
+#   lookback: 3
 
 # Hurst exponent computation settings
 hurst:
@@ -136,9 +137,9 @@ market_intelligence:
   enhanced: true  # Enable enhanced estimators (Corwin-Schultz, Roll, Kyle, Amihud)
   
   # Second-level data for microstructure (NEW - Option C implementation)
-  use_second_data: false  # Fetch second bars for tick-level analysis (adds ~10s)
-  # NOTE: Second data may not be available for all crypto pairs
-  # Enable only for equities or when you have confirmed Polygon access
+  use_second_data: true   # Fetch second bars for tick-level analysis (adds ~10s)
+  # Polygon has second data for ALL asset classes!
+  # Equities: 22K/day, Crypto: 84K/day, Forex: 71K/day
   second_data_lookback: 1  # Days of second data (default: 1 day)
   # When enabled: Better spread estimates, order flow, intra-minute dynamics
 
@@ -504,13 +505,13 @@ data_pipeline:
     max_age_hours: 24          # Maximum age (hours) of cached data to use
   
   # Second-aggregate utilization (Polygon second-level data)
-  # NOTE: Disabled by default - Polygon already has native 15m, 5m, 1m bars
-  # Enable this when you want ADDITIONAL second-level analysis (volatility shifts, order flow)
+  # Polygon has second data for ALL asset classes (equities, crypto, forex)
   second_aggs:
     enabled: false             # Use native Polygon bars (15m, 5m, 1m) - faster
     asset_classes:             # Which asset classes support second aggs
-      - equities               # Equities support second-level data
-    # Note: crypto and forex use minute bars, not second bars
+      - equities               # 22K second bars/day
+      - crypto                 # 84K second bars/day  
+      - forex                  # 71K second bars/day
     
     # Per-tier configuration
     tiers:
