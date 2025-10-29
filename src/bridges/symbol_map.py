@@ -82,6 +82,9 @@ SYMBOL_MAP = {
     
     "DOG-USD": "DOGUSD",
     "X:DOGUSD": "DOGUSD",
+    "X:DOGEUSD": "DOGEUSD",  # Common variant
+    "DOGE-USD": "DOGEUSD",
+    "DOGEUSD": "DOGEUSD",
     "DOGUSD": "DOGUSD",
     
     "DOT-USD": "DOTUSD",
@@ -552,7 +555,7 @@ CRYPTO_SYMBOLS = {
     # Alt Coins
     "LTCUSD", "BCHUSD", "ETCUSD", "TRXUSD", "XLMUSD", "VETUSD",
     # Meme/Social
-    "DOGUSD", "SHIBUSD", "BONKUSD", "PEPEUSD", "WIFUSD", "PEOPLEUSD",
+    "DOGUSD", "DOGEUSD", "SHIBUSD", "BONKUSD", "PEPEUSD", "WIFUSD", "PEOPLEUSD",
     # Gaming/NFT
     "AXSUSD", "MANAUSD", "SANDUSD", "GRTUSD",
     # Oracle/Infra
@@ -654,14 +657,28 @@ def to_qc_symbol(internal_symbol: str) -> str:
     if internal_symbol in SYMBOL_MAP:
         return SYMBOL_MAP[internal_symbol]
     
-    # Try removing common prefixes
-    clean_symbol = internal_symbol.replace("X:", "").replace("-", "")
+    # Try removing common prefixes and auto-convert
+    clean_symbol = internal_symbol.replace("X:", "").replace("C:", "").replace("-", "")
+    
+    # Check if clean version is in map
     if clean_symbol in SYMBOL_MAP:
         return SYMBOL_MAP[clean_symbol]
     
-    logger.warning(
-        f"Unknown symbol '{internal_symbol}', returning as-is. "
-        f"Consider adding to SYMBOL_MAP."
+    # Auto-handle crypto format (X:XXXUSD → XXXUSD)
+    if internal_symbol.startswith("X:") and internal_symbol.endswith("USD"):
+        crypto_symbol = internal_symbol.replace("X:", "")
+        logger.debug(f"Auto-converted crypto symbol: {internal_symbol} → {crypto_symbol}")
+        return crypto_symbol
+    
+    # Auto-handle forex format (C:XXXYYY → XXXYYY)
+    if internal_symbol.startswith("C:"):
+        fx_symbol = internal_symbol.replace("C:", "")
+        logger.debug(f"Auto-converted forex symbol: {internal_symbol} → {fx_symbol}")
+        return fx_symbol
+    
+    # Return as-is (will work if Polygon supports it)
+    logger.debug(
+        f"Symbol '{internal_symbol}' not in map, using as-is: {clean_symbol}"
     )
     return clean_symbol
 
