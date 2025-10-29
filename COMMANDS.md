@@ -4,6 +4,37 @@ Quick reference for all available commands in the Regime Detector system.
 
 ---
 
+## ⚡ Quick Start (For Impatient Traders)
+
+### **Best Practice Workflow** ⭐
+```bash
+# 1. Portfolio scan (15 assets, ~15 min - includes LLM validation)
+./analyze_portfolio.sh --custom SPY VOO VTI X:BTCUSD X:ETHUSD X:SOLUSD C:EURUSD
+
+# 2. Check rankings
+cat artifacts/portfolio_analysis_*.md | head -50
+
+# 3. Deep-dive top 3-5 (sequential, ~5 min total)
+for sym in TOP1 TOP2 TOP3; do
+  ./analyze.sh $sym fast
+done
+```
+
+**Jump to**: [Full Portfolio → Deep-Dive Workflow](#recommended-portfolio--deep-dive-most-efficient-)
+
+### **One-Off Analysis**
+```bash
+./analyze.sh SPY fast          # Quick check (1 min)
+./analyze.sh NVDA thorough     # Full analysis (8 min)
+```
+
+### **Testing**
+```bash
+make test                      # Run test suite
+```
+
+---
+
 ## 🔍 Scanner Commands
 
 ### **Scan Universe**
@@ -230,38 +261,163 @@ data/signals/YYYYMMDD-HHMMSS/signals.csv  # Timestamped
 
 ## 🎯 Common Workflows
 
-### **Daily Trading**
+### **Recommended: Portfolio → Deep-Dive** (Most Efficient) ⭐
+**Use this for regular trading - filters candidates then deep-dives winners**
+
 ```bash
-# 1. Morning scan (1 min)
-python -m src.scanner.main
+# STEP 1: Portfolio scan to filter candidates (15 assets in ~15 min)
+./analyze_portfolio.sh --custom SPY VOO VTI NVDA MSFT AAPL \
+  X:BTCUSD X:ETHUSD X:SOLUSD X:ADAUSD \
+  C:EURUSD C:GBPUSD C:AUDUSD C:NZDUSD C:USDCAD
 
-# 2. Analyze top picks (15 min)
-./scan_and_analyze.sh
+# Output: artifacts/portfolio_analysis_TIMESTAMP.md
+# Contains: Rankings with LLM validation, regime scores, stability metrics
 
-# 3. Validate best 2-3 (15 min)
-./analyze.sh --symbol NVDA --mode thorough
-./analyze.sh --symbol X:ETHUSD --mode thorough
+# STEP 2: Review portfolio report - pick top 3-5 from the table
+cat artifacts/portfolio_analysis_*.md | head -50
 
-# 4. Execute (paper)
+# Look for:
+# - High opportunity scores (>60)
+# - LLM confirmation (✅✅ or ✅)
+# - Good stability (MED or HIGH)
+# - High confidence (>60%)
+
+# STEP 3: Deep-dive top 3-5 with full narrative reports (sequential)
+# Based on your portfolio rankings, analyze top picks:
+for sym in C:NZDUSD C:AUDUSD VOO VTI X:ADAUSD; do
+  echo "🔍 Deep-diving $sym..."
+  ./analyze.sh $sym fast
+  echo "✅ Done - report saved"
+done
+
+# Time: ~1 min per asset × 5 = ~5 minutes
+# Output: Full reports in artifacts/SYMBOL/DATE/TIME/report.md
+
+# STEP 4: Read the full reports and make final decisions
+# Each report has:
+# - Compelling storyline
+# - Narrative summary
+# - Regime classification details
+# - Action plan (current state + post-gate plan)
+# - Market intelligence appendix
+
+# STEP 5: Execute top 1-2 positions
 python -m src.execution.cli execute --signals data/signals/latest/signals.csv --paper
 ```
 
-### **Quick Check**
-```bash
-# Check specific asset
-./analyze.sh --symbol SPY --mode fast
+**Total Time**: ~20 minutes (15 min portfolio + 5 min deep-dive)  
+**Why This Works**: Portfolio scan includes LLM validation for ALL assets, so you filter efficiently, then only deep-dive the winners.
 
-# Compare a few
-./analyze_portfolio.sh --custom SPY NVDA X:BTCUSD
+---
+
+### **Alternative: Scanner → Portfolio → Deep-Dive** (Comprehensive)
+**Use this when you want the system to find opportunities for you**
+
+```bash
+# STEP 1: Scan entire universe (~60 seconds)
+python -m src.scanner.main
+
+# Output: artifacts/scanner/latest/scanner_report.md
+# Top candidates by technical score
+
+# STEP 2: Analyze top 15 from scanner (~15 min)
+./scan_and_analyze.sh
+
+# Or manually from scanner output:
+./analyze_portfolio.sh --from-scanner artifacts/scanner/latest/scanner_output.json --top 15
+
+# STEP 3: Deep-dive top 3 from portfolio
+for sym in SYMBOL1 SYMBOL2 SYMBOL3; do
+  ./analyze.sh $sym fast
+done
+
+# STEP 4: Execute
+python -m src.execution.cli execute --signals data/signals/latest/signals.csv --paper
 ```
 
-### **Deep Research**
+**Total Time**: ~20 minutes  
+**When to Use**: Daily morning routine or when you want fresh ideas
+
+---
+
+### **Quick Check** (Single Asset)
 ```bash
-# Full analysis with backtest
-./analyze.sh --symbol X:BTCUSD --mode thorough
+# Check specific asset (1 min)
+./analyze.sh SPY fast
+
+# Compare a few assets (3 min)
+./analyze_portfolio.sh --custom SPY NVDA X:BTCUSD
+
+# View latest portfolio report
+cat artifacts/portfolio_analysis_*.md | head -100
+```
+
+**When to Use**: Quick regime check or position validation
+
+---
+
+### **Deep Research** (Thorough Analysis)
+```bash
+# Full analysis with backtest (5-10 min)
+./analyze.sh X:BTCUSD thorough
 
 # Check all artifacts
-ls artifacts/X:BTCUSD/2025-10-22/*/
+ls artifacts/X:BTCUSD/2025-10-29/*/
+
+# View full report
+cat artifacts/X:BTCUSD/2025-10-29/*/report.md
+```
+
+**When to Use**: Validating a major position or new strategy
+
+---
+
+### **Daily Trading Routine** (Market Hours)
+```bash
+# 9:30 AM ET - Market open
+# 1. Quick equity scan (1 min)
+python -m src.scanner.main --equities-only
+
+# 2. Analyze top picks (10 min)
+./analyze_portfolio.sh --from-scanner artifacts/scanner/latest/scanner_output.json --top 10
+
+# 3. Deep-dive top 2-3 (3 min)
+./analyze.sh NVDA fast
+./analyze.sh MSFT fast
+
+# 4. Execute if conditions met
+python -m src.execution.cli execute --signals data/signals/latest/signals.csv --paper
+
+# 5:00 PM ET - After market close
+# 5. Evening crypto/forex scan
+python -m src.scanner.main --no-equities
+
+# 6. Analyze crypto/forex (10 min)
+./analyze_portfolio.sh --custom X:BTCUSD X:ETHUSD C:EURUSD
+
+# 7. Deep-dive top 1-2
+./analyze.sh X:BTCUSD fast
+```
+
+---
+
+### **Weekend Workflow** (24/7 Markets)
+```bash
+# Focus on crypto and forex (markets never close)
+
+# 1. Scan crypto/forex universe
+python -m src.scanner.main --no-equities
+
+# 2. Analyze top picks
+./analyze_portfolio.sh --custom X:BTCUSD X:ETHUSD X:SOLUSD C:EURUSD C:GBPUSD
+
+# 3. Deep-dive top 3
+for sym in X:BTCUSD X:ETHUSD C:EURUSD; do
+  ./analyze.sh $sym fast
+done
+
+# 4. Execute
+python -m src.execution.cli execute --signals data/signals/latest/signals.csv --paper
 ```
 
 ---

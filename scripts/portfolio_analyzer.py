@@ -23,6 +23,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.agents.graph import run_pipeline
+from src.reporters.executive_report import write_report_to_disk
 
 
 def _extract_llm_verdict(llm_text: str) -> str:
@@ -75,6 +76,13 @@ def analyze_portfolio(symbols: List[str], mode: str = "fast") -> Dict[str, Any]:
         try:
             # Run analysis
             state = run_pipeline(symbol=symbol, mode=mode)
+            
+            # Write full report to disk (so users can review individual reports)
+            try:
+                write_report_to_disk(state)
+                print(f"  ✅ Full report generated: artifacts/{symbol}/...")
+            except Exception as report_err:
+                print(f"  ⚠️  Report generation failed: {report_err}")
             
             # Extract key metrics
             regime_mt = state.get('regime_mt')
