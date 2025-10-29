@@ -459,10 +459,14 @@ class ExecutionEngine:
             
             for symbol in signal_weights.keys():
                 try:
+                    # Detect asset class
+                    from src.bridges.symbol_map import parse_symbol_info
+                    _, symbol_asset_class, _ = parse_symbol_info(symbol)
+                    
                     df_daily, _, _ = manager.get_bars(
                         symbol=symbol,
                         tier='LT',
-                        asset_class='equities',
+                        asset_class=symbol_asset_class,  # Use correct asset class
                         bar='1d',
                         lookback_days=vt_config.lookback_days + 5
                     )

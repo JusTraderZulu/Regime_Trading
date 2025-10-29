@@ -230,7 +230,7 @@ class DataAccessManager:
             max_tries=max_tries,
             max_time=max_time,
             jitter=backoff.full_jitter,
-            on_backoff=lambda details: logger.warning(
+            on_backoff=lambda details: logger.debug(
                 f"Retry {details['tries']}/{max_tries} for {symbol} after {details['wait']:.1f}s"
             )
         )

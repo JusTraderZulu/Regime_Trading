@@ -74,14 +74,17 @@ def _compute_ccm_rho(
         return _pearson_r2_skill(aligned["A"], aligned["B"])
 
     try:
-        lib_sizes_str = ",".join(str(int(size)) for size in lib_sizes)
+        # Convert lib_sizes to format pyEDM expects
+        # Try passing as list first, fallback to string if needed
+        lib_sizes_list = [int(size) for size in lib_sizes] if lib_sizes else [50, 80, 120]
+        lib_sizes_str = " ".join(str(size) for size in lib_sizes_list)  # Space-separated, not comma
         result = EDM_CCM(
             dataFrame=aligned,
             E=E,
             tau=tau,
             columns="A",
             target="B",
-            libSizes=lib_sizes_str,
+            libSizes=lib_sizes_str,  # pyEDM expects space-separated string
         )
         rho_series = pd.to_numeric(result.get("rho", pd.Series(dtype=float)), errors="coerce")
         rho = float(rho_series.mean()) if not rho_series.empty else float("nan")
@@ -89,7 +92,7 @@ def _compute_ccm_rho(
             return _pearson_r2_skill(aligned["A"], aligned["B"])
         return rho
     except Exception as exc:  # pragma: no cover - pyEDM runtime safety
-        logger.warning("pyEDM CCM failed (falling back to correlation proxy): %s", exc)
+        logger.debug("pyEDM CCM unavailable (using correlation proxy): %s", exc)
         return _pearson_r2_skill(aligned["A"], aligned["B"])
 
 

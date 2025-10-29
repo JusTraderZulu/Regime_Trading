@@ -103,7 +103,10 @@ ccm:
   # CCM parameters
   E: 3
   tau: 1
-  lib_sizes: [50, 80, 120]
+  lib_sizes:
+    - 50
+    - 80
+    - 120
   min_points: 200
 
   # Interpretation thresholds
@@ -133,7 +136,9 @@ market_intelligence:
   enhanced: true  # Enable enhanced estimators (Corwin-Schultz, Roll, Kyle, Amihud)
   
   # Second-level data for microstructure (NEW - Option C implementation)
-  use_second_data: true   # Fetch second bars for tick-level analysis (adds ~10s)
+  use_second_data: false  # Fetch second bars for tick-level analysis (adds ~10s)
+  # NOTE: Second data may not be available for all crypto pairs
+  # Enable only for equities or when you have confirmed Polygon access
   second_data_lookback: 1  # Days of second data (default: 1 day)
   # When enabled: Better spread estimates, order flow, intra-minute dynamics
 

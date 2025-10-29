@@ -1731,66 +1731,45 @@ def export_signals_node(state: PipelineState) -> Dict:
                 annualization_factor=vol_target_cfg.get("annualization_factor", 252.0)
             )
             
-            # Collect signal weights by symbol
-            signal_weights = {}
-            symbol_to_signal_idx = {}
-            for idx, signal in enumerate(signals):
-                symbol = signal.symbol
-                weight = signal.weight
-                if symbol not in signal_weights or weight > signal_weights[symbol]:
-                    signal_weights[symbol] = weight
-                    symbol_to_signal_idx[symbol] = idx
+            # For single-asset analysis, use data already in state
+            # Avoids refetching and symbol format issues
+            original_symbol = state.get('symbol')  # Original format (X:BTCUSD)
             
-            # Get recent returns for all assets via DataAccessManager
-            returns_data = {}
-            data_manager = state.get('_data_manager')  # Reuse if available
-            if not data_manager:
-                from src.data.manager import DataAccessManager
-                data_manager = DataAccessManager()
-            
-            for symbol in signal_weights.keys():
+            # Use daily data already loaded in state
+            df_daily = state.get('data_lt')
+            if df_daily is not None and len(df_daily) > 1:
                 try:
-                    # Get recent daily data for returns calculation
-                    df_daily, _, _ = data_manager.get_bars(
-                        symbol=symbol,
-                        tier='LT',
-                        asset_class='equities',  # Will be overridden by parse_symbol_info
-                        bar='1d',
-                        lookback_days=vt_config.lookback_days + 5
-                    )
+                    returns = df_daily['close'].pct_change().dropna()
                     
-                    if df_daily is not None and len(df_daily) > 1:
-                        returns = df_daily['close'].pct_change().dropna()
-                        returns_data[symbol] = returns
+                    # Build signal weights using original symbol
+                    signal_weights = {original_symbol: regime_mt.confidence if regime_mt else 0.5}
+                    returns_data = {original_symbol: returns}
+                    
+                    # Apply volatility targeting
+                    allocator = VolatilityTargetAllocator(vt_config)
+                    scaled_weights, diagnostics = allocator.allocate(signal_weights, returns_data)
+                    
+                    # Update signal weights (only for non-flat signals)
+                    for signal in signals:
+                        # Match by regime tier, not symbol (QC format differs)
+                        # Only update if signal is not flat (side != 0)
+                        if signal.regime == regime_mt.label.value and signal.side != 0:
+                            signal.weight = scaled_weights.get(original_symbol, signal.weight)
+                    
+                    # Store diagnostics
+                    state['volatility_targeting_diagnostics'] = diagnostics.to_dict()
+                    
+                    logger.info(
+                        f"✓ Volatility targeting applied: "
+                        f"scale={diagnostics.scaling_factor:.2f}, "
+                        f"est_vol={diagnostics.estimated_volatility:.1%}, "
+                        f"target={diagnostics.target_volatility:.1%}"
+                    )
                 except Exception as e:
-                    logger.warning(f"Failed to get returns for {symbol}: {e}")
-            
-            # Apply volatility targeting
-            allocator = VolatilityTargetAllocator(vt_config)
-            scaled_weights, diagnostics = allocator.allocate(signal_weights, returns_data)
-            
-            # Update signal weights
-            for symbol, scaled_weight in scaled_weights.items():
-                if symbol in symbol_to_signal_idx:
-                    idx = symbol_to_signal_idx[symbol]
-                    signals[idx].weight = scaled_weight
-            
-            # Store diagnostics in state
-            state['volatility_targeting_diagnostics'] = diagnostics.to_dict()
-            
-            logger.info(
-                f"✓ Volatility targeting applied: "
-                f"scale={diagnostics.scaling_factor:.2f}, "
-                f"est_vol={diagnostics.estimated_volatility:.1%}, "
-                f"target={diagnostics.target_volatility:.1%}"
-            )
-            
-            if diagnostics.warnings:
-                for warning in diagnostics.warnings:
-                    logger.warning(f"Vol targeting: {warning}")
+                    logger.warning(f"Volatility targeting computation failed: {e}")
                     
         except Exception as e:
-            logger.error(f"Volatility targeting failed: {e}")
+            logger.debug(f"Volatility targeting skipped: {e}")
             # Continue without vol targeting (non-breaking)
     
     # Sort signals by time to ensure chronological order

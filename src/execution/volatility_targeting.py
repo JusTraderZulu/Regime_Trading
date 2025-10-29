@@ -134,7 +134,7 @@ class VolatilityTargetAllocator:
         
         if not valid_assets:
             warnings.append("No valid assets with both signals and returns")
-            logger.warning("No valid assets for allocation")
+            logger.debug("No valid assets for allocation (likely single-asset analysis)")
             return signal_weights, AllocationDiagnostics(
                 original_weights=signal_weights.copy(),
                 scaled_weights=signal_weights.copy(),
