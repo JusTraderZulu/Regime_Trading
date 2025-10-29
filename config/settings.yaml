@@ -94,12 +94,20 @@ ccm:
   tiers: ["LT", "MT", "ST"]
   tiers_for_ccm: ["ST", "MT"]
 
-  # Directed asset pairs to evaluate (A leads B, and B leads A)
+  # Asset-class specific CCM pairs (more relevant comparisons)
   pairs:
-    - ["NVDA", "SPY"]
-    - ["AAPL", "SPY"]
-    - ["BTC-USD", "ETH-USD"]
-    - ["EUR-USD", "USD-JPY"]
+    crypto:  # For crypto assets, compare to other crypto and macro
+      - ["BTC-USD", "ETH-USD"]
+      - ["X:BTCUSD", "X:ETHUSD"]
+    
+    equity:  # For equities, compare to indices and volatility
+      - ["NVDA", "SPY"]
+      - ["AAPL", "SPY"]
+      - ["MSFT", "QQQ"]
+    
+    forex:  # For forex, compare to related pairs
+      - ["EUR-USD", "USD-JPY"]
+      - ["GBP-USD", "EUR-USD"]
 
   # CCM parameters
   E: 3
