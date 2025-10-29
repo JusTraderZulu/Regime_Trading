@@ -174,6 +174,28 @@ class SignalRow(BaseModel):
         description="Recommended position sizing as % of max risk"
     )
     
+    # NEW: Gate enforcement (v1.2 refactoring)
+    execution_ready: Optional[bool] = Field(
+        default=None,
+        description="True if all execution gates passed"
+    )
+    gate_blockers: Optional[str] = Field(
+        default=None,
+        description="Comma-separated list of active blockers (e.g., 'low_confidence,higher_tf_disagree')"
+    )
+    effective_confidence: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="Confidence after persistence damping"
+    )
+    unified_score: Optional[float] = Field(
+        default=None, ge=-1.0, le=1.0,
+        description="Unified regime score from classifier"
+    )
+    consistency_score: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="Internal consistency score (regime vs statistics)"
+    )
+    
     microstructure_liquidity: Optional[str] = Field(
         default=None,
         description="Liquidity assessment (high/moderate/low/unknown)"
@@ -270,6 +292,12 @@ class SignalRow(BaseModel):
             "action_bias": self.action_bias or "",
             "action_tactical_mode": self.action_tactical_mode or "",
             "action_sizing_pct": f"{self.action_sizing_pct:.1f}" if self.action_sizing_pct is not None else "",
+            # Gate enforcement
+            "execution_ready": str(self.execution_ready) if self.execution_ready is not None else "",
+            "gate_blockers": self.gate_blockers or "",
+            "effective_confidence": f"{self.effective_confidence:.3f}" if self.effective_confidence is not None else "",
+            "unified_score": f"{self.unified_score:.3f}" if self.unified_score is not None else "",
+            "consistency_score": f"{self.consistency_score:.3f}" if self.consistency_score is not None else "",
         }
     
     class Config:

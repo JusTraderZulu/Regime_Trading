@@ -155,9 +155,13 @@ SYMBOL_MAP = {
     "X:MANAUSD": "MANAUSD",
     "MANAUSD": "MANAUSD",
     
-    "MATIC-USD": "MATICUSD",
-    "X:MATICUSD": "MATICUSD",
-    "MATICUSD": "MATICUSD",
+    "MATIC-USD": "POLUSD",  # MATIC rebranded to POL (Oct 2024)
+    "X:MATICUSD": "POLUSD",  # Auto-redirect to POL
+    "MATICUSD": "POLUSD",    # Auto-redirect to POL
+    
+    "POL-USD": "POLUSD",
+    "X:POLUSD": "POLUSD",
+    "POLUSD": "POLUSD",
     
     "MKR-USD": "MKRUSD",
     "X:MKRUSD": "MKRUSD",
@@ -391,6 +395,10 @@ SYMBOL_MAP = {
     "ARCA:SPY": "SPY",
     "QQQ": "QQQ",
     "NASDAQ:QQQ": "QQQ",
+    "VOO": "VOO",  # Vanguard S&P 500 ETF
+    "ARCA:VOO": "VOO",
+    "VTI": "VTI",  # Vanguard Total Stock Market ETF
+    "ARCA:VTI": "VTI",
     "DIA": "DIA",
     "IWM": "IWM",
     "VIX": "VIX",
@@ -551,7 +559,7 @@ CRYPTO_SYMBOLS = {
     "ADAUSD", "AVAXUSD", "DOTUSD", "ATOMUSD", "NEARUSD", "APTUSD", "SUIUSD", 
     "ICPUSD", "ALGOUSD", "EOSUSD", "FILUSD", "FLOWUSD", "THETAUSD", "TIAUSD", "TONUSD",
     # Layer 2
-    "MATICUSD", "OPUSD", "ARBUSD", "STRKUSD", "STXUSD",
+    "POLUSD", "MATICUSD", "OPUSD", "ARBUSD", "STRKUSD", "STXUSD",  # Note: MATICUSD → POLUSD (rebranded)
     # Alt Coins
     "LTCUSD", "BCHUSD", "ETCUSD", "TRXUSD", "XLMUSD", "VETUSD",
     # Meme/Social
@@ -577,7 +585,7 @@ FX_SYMBOLS = {
 
 EQUITY_SYMBOLS = {
     # Indices/ETFs
-    "SPY", "QQQ", "DIA", "IWM", "VIX", "DXY", "XLE", "XLF", "XLK",
+    "SPY", "QQQ", "VOO", "VTI", "DIA", "IWM", "VIX", "DXY", "XLE", "XLF", "XLK",
     # Tech/Software (100+)
     "AAPL", "MSFT", "NVDA", "META", "GOOGL", "GOOG", "AMZN", "TSLA", "NFLX",
     "AMD", "INTC", "QCOM", "AVGO", "TXN", "AMAT", "MU", "LRCX", "KLAC",

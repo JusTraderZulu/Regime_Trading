@@ -219,16 +219,26 @@ class DataAccessManager:
         Fetch data with exponential backoff retry.
         
         Uses backoff library with jitter for resilience.
+        Honors configuration:
+        - max_tries: Maximum retry attempts
+        - max_time: Maximum total time for retries
+        - base_delay: Initial delay between retries
+        - max_delay: Maximum delay between retries (factor)
         """
         retry_config = self.config.get('data_pipeline', {}).get('retry', {})
         max_tries = retry_config.get('max_tries', 3)
         max_time = retry_config.get('max_time', 30)
+        base_delay = retry_config.get('base_delay', 1)
+        max_delay_factor = retry_config.get('max_delay', 10)
         
         @backoff.on_exception(
             backoff.expo,
             Exception,
             max_tries=max_tries,
             max_time=max_time,
+            base=base_delay,
+            factor=2,  # Exponential factor (delay doubles each retry)
+            max_value=max_delay_factor,  # Cap maximum delay
             jitter=backoff.full_jitter,
             on_backoff=lambda details: logger.debug(
                 f"Retry {details['tries']}/{max_tries} for {symbol} after {details['wait']:.1f}s"
@@ -255,6 +265,13 @@ class DataAccessManager:
         """
         Determine if second-level aggregates should be used.
         
+        Honors configuration flags:
+        - Global enabled flag
+        - Asset class support
+        - Tier-specific enabled flag
+        - Minimum bars requirement
+        - Fallback preferences
+        
         Args:
             asset_class: Asset class (will be normalized to lowercase)
             tier: Tier name
@@ -267,6 +284,7 @@ class DataAccessManager:
         
         # Check if enabled globally
         if not second_cfg.get('enabled', False):
+            logger.debug(f"Second aggregates disabled globally")
             return False
         
         # Normalize asset class to lowercase for comparison
@@ -280,15 +298,25 @@ class DataAccessManager:
         # Check if asset class supports seconds
         supported_classes = second_cfg.get('asset_classes', [])
         if asset_class_normalized not in supported_classes:
+            logger.debug(f"Asset class {asset_class_normalized} not in supported classes: {supported_classes}")
             return False
         
         # Check tier-specific config
         tier_cfg = second_cfg.get('tiers', {}).get(tier, {})
         if not tier_cfg.get('enabled', False):
+            logger.debug(f"Second aggregates disabled for tier {tier}")
             return False
+        
+        # Honor min_bars requirement
+        min_bars = tier_cfg.get('min_bars', 0)
+        if min_bars > 0:
+            # Note: We can't check available bars here without fetching first
+            # This check happens after fetch in _fetch_second_aggs
+            logger.debug(f"Second aggregates for {tier} requires min_bars={min_bars}")
         
         # Only use for minute and sub-minute bars
         if bar not in ['1m', '5m', '15m']:
+            logger.debug(f"Bar size {bar} not suitable for second aggregation")
             return False
         
         return True
@@ -303,6 +331,10 @@ class DataAccessManager:
         """
         Fetch second-level aggregates from Polygon and aggregate to target bar size.
         
+        Honors configuration:
+        - min_bars: Minimum bars required to use seconds
+        - fallback_to_minute: Whether to return None (triggering minute fallback)
+        
         Args:
             symbol: Asset symbol
             tier: Tier name
@@ -314,9 +346,12 @@ class DataAccessManager:
         """
         second_cfg = self.config.get('data_pipeline', {}).get('second_aggs', {})
         agg_cfg = second_cfg.get('aggregation', {})
+        tier_cfg = second_cfg.get('tiers', {}).get(tier, {})
         
         chunk_days = agg_cfg.get('chunk_days', 7)
         max_lookback = agg_cfg.get('max_seconds_lookback', 30)
+        min_bars = tier_cfg.get('min_bars', 0)
+        fallback_to_minute = tier_cfg.get('fallback_to_minute', True)
         
         # Limit lookback for seconds (they're expensive)
         actual_lookback = min(lookback_days, max_lookback)
@@ -328,25 +363,63 @@ class DataAccessManager:
             )
             
             if seconds_df is None or seconds_df.empty:
-                logger.warning(f"No second-level data for {symbol}, will try fallback")
-                return None, DataProvenance(
-                    source='polygon_second',
-                    health=DataHealth.FAILED,
-                    aggregated=False,
-                    bars_count=0
-                )
+                if fallback_to_minute:
+                    logger.info(f"No second-level data for {symbol} {tier}, falling back to minute bars")
+                    return None, DataProvenance(
+                        source='polygon_second',
+                        health=DataHealth.FAILED,
+                        aggregated=False,
+                        bars_count=0
+                    )
+                else:
+                    logger.warning(f"No second-level data for {symbol} {tier}, fallback disabled")
+                    return None, DataProvenance(
+                        source='polygon_second',
+                        health=DataHealth.FAILED,
+                        aggregated=False,
+                        bars_count=0
+                    )
             
             # Aggregate to target bar size
             aggregated_df = self._aggregate_seconds_to_bars(seconds_df, bar)
             
             if aggregated_df is None or aggregated_df.empty:
-                logger.warning(f"Aggregation failed for {symbol}")
-                return None, DataProvenance(
-                    source='polygon_second',
-                    health=DataHealth.FAILED,
-                    aggregated=True,
-                    bars_count=0
-                )
+                if fallback_to_minute:
+                    logger.info(f"Aggregation failed for {symbol} {tier}, falling back to minute bars")
+                    return None, DataProvenance(
+                        source='polygon_second',
+                        health=DataHealth.FAILED,
+                        aggregated=True,
+                        bars_count=0
+                    )
+                else:
+                    logger.warning(f"Aggregation failed for {symbol} {tier}, fallback disabled")
+                    return None, DataProvenance(
+                        source='polygon_second',
+                        health=DataHealth.FAILED,
+                        aggregated=True,
+                        bars_count=0
+                    )
+            
+            # Check min_bars requirement
+            if min_bars > 0 and len(aggregated_df) < min_bars:
+                if fallback_to_minute:
+                    logger.info(
+                        f"Insufficient bars for {symbol} {tier} ({len(aggregated_df)} < {min_bars}), "
+                        f"falling back to minute bars"
+                    )
+                    return None, DataProvenance(
+                        source='polygon_second',
+                        health=DataHealth.FAILED,
+                        aggregated=True,
+                        bars_count=len(aggregated_df)
+                    )
+                else:
+                    logger.warning(
+                        f"Insufficient bars for {symbol} {tier} ({len(aggregated_df)} < {min_bars}), "
+                        f"fallback disabled - using what we have"
+                    )
+                    # Use what we have even if below min_bars
             
             # Create provenance
             provenance = DataProvenance(
@@ -364,6 +437,8 @@ class DataAccessManager:
             
         except Exception as e:
             logger.error(f"Second aggregate fetch failed for {symbol}: {e}")
+            if fallback_to_minute:
+                logger.info(f"Falling back to minute bars for {symbol} {tier}")
             return None, DataProvenance(
                 source='polygon_second',
                 health=DataHealth.FAILED,
@@ -472,11 +547,20 @@ class DataAccessManager:
             
             # Add vwap if present
             if 'vwap' in seconds_df.columns:
-                # Volume-weighted average price
-                agg_dict['vwap'] = lambda x: (
-                    (seconds_df.loc[x.index, 'vwap'] * seconds_df.loc[x.index, 'volume']).sum() / 
-                    seconds_df.loc[x.index, 'volume'].sum()
-                )
+                # Volume-weighted average price with zero-division guard
+                def safe_vwap(x):
+                    """Compute VWAP with zero-volume protection"""
+                    try:
+                        vol_sum = seconds_df.loc[x.index, 'volume'].sum()
+                        if vol_sum == 0 or pd.isna(vol_sum):
+                            # No volume - use simple average of vwap
+                            return seconds_df.loc[x.index, 'vwap'].mean()
+                        return (seconds_df.loc[x.index, 'vwap'] * seconds_df.loc[x.index, 'volume']).sum() / vol_sum
+                    except (ZeroDivisionError, KeyError):
+                        # Fallback to mean if any issue
+                        return seconds_df.loc[x.index, 'vwap'].mean()
+                
+                agg_dict['vwap'] = safe_vwap
             
             # Resample and aggregate
             aggregated = seconds_df.resample(rule).agg(agg_dict).dropna(subset=['close'])

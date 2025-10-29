@@ -1,6 +1,8 @@
 # Major S&P 500 Equities
 SPY
 QQQ
+VOO
+VTI
 AAPL
 MSFT
 NVDA

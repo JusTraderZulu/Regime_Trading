@@ -60,6 +60,12 @@ CSV_HEADERS = [
     "action_bias",
     "action_tactical_mode",
     "action_sizing_pct",
+    # NEW: Gate enforcement (v1.2 refactoring)
+    "execution_ready",
+    "gate_blockers",
+    "effective_confidence",
+    "unified_score",
+    "consistency_score",
 ]
 
 

@@ -84,7 +84,7 @@ class UnifiedRegimeClassifier:
         """
         # Compute components
         hurst_comp = self._hurst_component(features.hurst_rs)
-        vr_comp = self._vr_component(features.variance_ratio)
+        vr_comp = self._vr_component(features.vr_statistic)
         adf_comp = self._adf_component(features.adf_p_value)
         
         # Unified score
@@ -126,15 +126,20 @@ class UnifiedRegimeClassifier:
     
     def _vr_component(self, vr: float) -> float:
         """
-        VR component: 1 - VR (inverted so trending is positive)
+        VR component: normalized deviation from 1.0
         
-        VR < 1 → trending (positive)
-        VR > 1 → mean-reverting (negative)
+        VR < 1 → trending (positive, mean reversion in variance)
+        VR > 1 → mean-reverting (negative, trend in variance)
+        VR = 1 → random walk (0)
         
         Returns:
-            -1 to +1
+            -1 to +1, clamped
         """
-        return 1.0 - vr
+        # VR = 1 is random walk, VR < 1 is trending, VR > 1 is mean-reverting
+        # Map to [-1, +1] with trending positive
+        deviation = 1.0 - vr
+        # Clamp to reasonable range (VR typically in [0.5, 1.5])
+        return max(-1.0, min(1.0, deviation * 2.0))
     
     def _adf_component(self, p_value: Optional[float]) -> float:
         """

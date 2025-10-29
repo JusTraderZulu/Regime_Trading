@@ -709,8 +709,19 @@ def summarizer_node(state: PipelineState) -> dict:
         save_json_util(snapshot_data, Path(artifacts_dir_path) / "data_snapshot.json")
         logger.info("  ✓ Data snapshot saved to data_snapshot.json")
 
+    # Generate storyline and narrative
+    unified_score_val = regime_mt.unified_score if regime_mt.unified_score is not None else 0.0
+    storyline = _generate_storyline(symbol, regime_mt, unified_score_val, mt_effective_conf)
+    narrative_summary = _generate_narrative_summary(
+        symbol, regime_mt, unified_score_val, mt_effective_conf, 
+        execution_ready, blocker_notes
+    )
+    
     summary_lines = [
         f"# {symbol} Regime Analysis Report",
+        "",
+        f"**Storyline:** {storyline}",
+        "",
         f"**Generated:** {timestamp_est.strftime('%Y-%m-%d %H:%M:%S %Z')}",
         f"**Lookback Windows:** {lookback_line}",
         "**Methodology:** Multi-tier regime detection with hysteresis, volatility-scaled gates, and event blackouts",
@@ -721,6 +732,10 @@ def summarizer_node(state: PipelineState) -> dict:
         f"- **Execution Ready:** {execution_ready_text}",
         f"- **Bias:** {bias}; **Sizing:** {position_size}",
         f"- **Strategy:** {recommended_strategy}",
+        "",
+        "## Narrative Summary",
+        "",
+        narrative_summary,
         "",
         "## Tier Hierarchy",
         f"- **LT ({lt_bar_label}):** {regime_lt.label.value if regime_lt else 'n/a'} ({lt_conf_text}) — macro context",
@@ -733,8 +748,44 @@ def summarizer_node(state: PipelineState) -> dict:
         f"- {us_bar_label} gates: {_format_gates(regime_us)}; conflicts: {_format_conflicts(regime_us)}; alignment vs {primary_tf}: {us_alignment_text}",
         f"- Blockers: {', '.join(blocker_notes) if blocker_notes else 'none'}",
         "",
-        "## Market Intelligence (News & Sentiment)",
     ]
+    
+    # Add Regime Classification Details section
+    if regime_mt.unified_score is not None or regime_mt.consistency_score is not None:
+        summary_lines.extend([
+            "## Regime Classification Details",
+            "",
+        ])
+        
+        if regime_mt.unified_score is not None:
+            # Parse rationale for component scores
+            rationale = regime_mt.rationale or ""
+            score_match = None
+            if "Score:" in rationale:
+                score_section = rationale.split("Score:")[-1].split("|")[0].strip()
+                summary_lines.append(f"**Unified Score:** {regime_mt.unified_score:+.3f}")
+                summary_lines.append(f"- Breakdown: {score_section}")
+            else:
+                summary_lines.append(f"**Unified Score:** {regime_mt.unified_score:+.3f} ({'+' if regime_mt.unified_score >= 0.1 else ('-' if regime_mt.unified_score <= -0.1 else '~')}0.10 threshold)")
+            
+            summary_lines.append(f"- Raw Confidence: {mt_confidence:.1%}")
+            summary_lines.append(f"- Effective Confidence: {mt_effective_conf:.1%} (after persistence damping)")
+            
+            if regime_mt.llm_adjustment:
+                summary_lines.append(f"- LLM Adjustment: {regime_mt.llm_adjustment:+.1%}")
+        
+        if regime_mt.consistency_score is not None:
+            consistency_emoji = "✅" if regime_mt.consistency_score >= 0.8 else ("⚠️" if regime_mt.consistency_score >= 0.6 else "❌")
+            summary_lines.append(f"**Consistency Score:** {consistency_emoji} {regime_mt.consistency_score:.1%}")
+            if regime_mt.consistency_score < 0.8:
+                summary_lines.append("- _Note: Check that regime label aligns with statistical indicators_")
+        
+        summary_lines.extend(["", "## Market Intelligence (News & Sentiment)"])
+    else:
+        summary_lines.extend(["## Market Intelligence (News & Sentiment)"])
+    
+    summary_lines.extend([
+    ])
 
     if (asset_class or "").upper() == "EQUITY" and equity_meta:
         tiers_meta: Dict[str, Dict[str, Any]] = equity_meta.get("tiers", {})
@@ -934,10 +985,25 @@ def summarizer_node(state: PipelineState) -> dict:
         if rr > 0:
             risk_reward = round(rr, 2)
 
+    # Generate compact narrative summary for YAML
+    regime_word = mt_regime.value
+    score_word = "strong trending" if unified_score_val > 0.3 else ("trending" if unified_score_val > 0.1 else ("mean-reverting" if unified_score_val < -0.1 else "neutral"))
+    
+    if execution_ready:
+        exec_status_word = 'ready'
+    else:
+        exec_status_word = 'blocked: ' + (blocker_notes[0] if blocker_notes else 'gates')
+    
+    yaml_narrative = f"{symbol} {regime_word} regime ({mt_effective_conf:.0%} conf); {score_word} signals; {exec_status_word}"
+    
     trading_signal_summary = {
         "symbol": symbol,
         "regime": mt_regime.value,
-        "confidence": round(mt_confidence, 4),
+        "confidence_raw": round(mt_confidence, 4),
+        "confidence_effective": round(mt_effective_conf, 4),
+        "unified_score": round(regime_mt.unified_score, 4) if regime_mt.unified_score is not None else None,
+        "consistency_score": round(regime_mt.consistency_score, 4) if regime_mt.consistency_score is not None else None,
+        "narrative_summary": yaml_narrative,
         "bias": bias,
         "horizon": "48h or 12 ST bars",
         "recommended_strategy": recommended_strategy,
@@ -978,70 +1044,6 @@ def summarizer_node(state: PipelineState) -> dict:
             f"- Max Drawdown: {backtest_st.max_drawdown:.2%}",
             "",
         ])
-
-    dual_llm_research = state.get("dual_llm_research")
-    if dual_llm_research and isinstance(dual_llm_research, dict):
-        summary_lines.extend([
-            "## 🤖 Multi-Agent Research Analysis",
-            "",
-        ])
-        context_agent = dual_llm_research.get("context_agent", {})
-        analytical_agent = dual_llm_research.get("analytical_agent", {})
-        if context_agent.get("research"):
-            provider = context_agent.get("provider", "unknown").upper()
-            summary_lines.extend([
-                f"### Real-Time Context Analysis ({provider})",
-                "",
-            ])
-            summary_lines.extend(context_agent["research"].strip().splitlines())
-            summary_lines.append("")
-        if analytical_agent.get("research"):
-            provider = analytical_agent.get("provider", "unknown").upper()
-            summary_lines.extend([
-                f"### Quantitative Analysis ({provider})",
-                "",
-            ])
-            summary_lines.extend(analytical_agent["research"].strip().splitlines())
-            summary_lines.append("")
-        from src.agents.dual_llm_contradictor import compare_llm_analyses
-        comparison = compare_llm_analyses(
-            context_agent.get("research"),
-            analytical_agent.get("research"),
-        )
-        
-        # Extract CONFIRM/CONTRADICT verdicts from LLM outputs
-        context_verdict = _extract_verdict(context_agent.get("research", ""))
-        analytical_verdict = _extract_verdict(analytical_agent.get("research", ""))
-        
-        # Build synthesis with validation results
-        synthesis_lines = ["### Research Synthesis", ""]
-        
-        # Show verdict summary
-        if context_verdict or analytical_verdict:
-            synthesis_lines.append("**Regime Validation Results:**")
-            if context_verdict:
-                synthesis_lines.append(f"- Context Agent: {context_verdict}")
-            if analytical_verdict:
-                synthesis_lines.append(f"- Analytical Agent: {analytical_verdict}")
-            synthesis_lines.append("")
-        
-        # Calculate confidence adjustment based on verdicts
-        confidence_adjustment = _calculate_confidence_adjustment(
-            context_verdict, 
-            analytical_verdict,
-            mt_effective_conf if 'mt_effective_conf' in locals() else 0.5
-        )
-        
-        if comparison.get("synthesis"):
-            synthesis_lines.extend([
-                f"**Key Insights:** {comparison['synthesis']}",
-                "",
-            ])
-        
-        synthesis_lines.append(f"**Confidence Adjustment:** {confidence_adjustment}")
-        synthesis_lines.append("")
-        
-        summary_lines.extend(synthesis_lines)
 
     summary_md = "\n".join(summary_lines)
 
@@ -1375,35 +1377,63 @@ def summarizer_node(state: PipelineState) -> dict:
         action_outlook = build_action_outlook(state)
         logger.info(f"Action-Outlook: {action_outlook['bias']}, conviction={action_outlook['conviction_score']:.0%}, mode={action_outlook['tactical_mode']}")
         
-        # Add to summary_md
+        # Add to summary_md with restructured format
         summary_md += f"""
 
-## 🎯 Action-Outlook — Probability-Based Positioning
+## 🎯 Action Plan
 
+### Current State
+
+**Execution Status:** {'✅ Ready to Execute' if execution_ready else f'🚫 Blocked'}  
 **Conviction:** {action_outlook['conviction_score']*100:.0f}/100 ({['low', 'moderate', 'good', 'high'][min(3, int(action_outlook['conviction_score']*4))]})  
 **Stability:** {action_outlook['stability_score']*100:.0f}/100 (regime persistence)  
-**Bias:** {action_outlook['bias'].replace('_', ' ').title()}
-
-**Positioning:**
-- **Sizing:** {action_outlook['positioning']['sizing_x_max']*100:.0f}% of max risk ({action_outlook['positioning']['sizing_x_max']:.2f}x)
-- **Directional Exposure:** {action_outlook['positioning']['directional_exposure']:+.2f} ({'net long' if action_outlook['positioning']['directional_exposure'] > 0 else ('net short' if action_outlook['positioning']['directional_exposure'] < 0 else 'neutral')})
-- **Leverage:** {action_outlook['positioning']['leverage_hint']}
-
+**Bias:** {action_outlook['bias'].replace('_', ' ').title()}  
 **Tactical Mode:** {action_outlook['tactical_mode'].replace('_', ' ').title()}
 
 """
         
-        # Add levels if available
-        if action_outlook['levels']['entry_zones']:
-            summary_md += f"**Entry Zones:** {', '.join([f'${z[0]:,.2f}-${z[1]:,.2f}' for z in action_outlook['levels']['entry_zones']])}\n"
-        if action_outlook['levels']['breakout_level']:
-            summary_md += f"**Breakout Level:** ${action_outlook['levels']['breakout_level']:,.2f}\n"
-        if action_outlook['levels']['invalidations']:
-            summary_md += f"**Invalidation:** {'; '.join(action_outlook['levels']['invalidations'])}\n"
+        if not execution_ready:
+            # Show blockers
+            summary_md += "**Active Blockers:**\n"
+            if blocker_notes:
+                for blocker in blocker_notes:
+                    summary_md += f"- ❌ {blocker}\n"
+            summary_md += "\n"
         
-        summary_md += f"""
+        # Add levels if available
+        if action_outlook['levels']['entry_zones'] or action_outlook['levels']['breakout_level']:
+            summary_md += "**Key Levels:**\n"
+            if action_outlook['levels']['entry_zones']:
+                summary_md += f"- **Entry Zones:** {', '.join([f'${z[0]:,.2f}-${z[1]:,.2f}' for z in action_outlook['levels']['entry_zones']])}\n"
+            if action_outlook['levels']['breakout_level']:
+                summary_md += f"- **Breakout:** ${action_outlook['levels']['breakout_level']:,.2f}\n"
+            if action_outlook['levels']['invalidations']:
+                summary_md += f"- **Invalidation:** {'; '.join(action_outlook['levels']['invalidations'])}\n"
+            summary_md += "\n"
+        
+        # Post-Gate Plan section
+        summary_md += "### Post-Gate Plan\n\n"
+        
+        if execution_ready:
+            # Currently ready - show active plan
+            summary_md += f"""**Target Sizing:** {action_outlook['positioning']['sizing_x_max']*100:.0f}% of max risk ({action_outlook['positioning']['sizing_x_max']:.2f}x)  
+**Directional Exposure:** {action_outlook['positioning']['directional_exposure']:+.2f} ({'net long' if action_outlook['positioning']['directional_exposure'] > 0 else ('net short' if action_outlook['positioning']['directional_exposure'] < 0 else 'neutral')})  
+**Leverage:** {action_outlook['positioning']['leverage_hint']}
+
 **Next Checks:**
 """
+        else:
+            # Blocked - show hypothetical plan
+            hypothetical_size = action_outlook['conviction_score'] * action_outlook['stability_score']
+            summary_md += f"""**If Gates Clear:**  
+- Hypothetical sizing: {hypothetical_size*100:.0f}% of max risk ({hypothetical_size:.2f}x)
+- Blockers to clear: {', '.join(blocker_notes[:3]) if blocker_notes else 'none'}
+- Trigger: Wait for alignment across timeframes
+
+**Next Checks:**
+"""
+        
+        # Add confirmations
         if action_outlook['next_checks']['confirmations']:
             for conf in action_outlook['next_checks']['confirmations']:
                 summary_md += f"- ✓ Confirm: {conf}\n"
@@ -1412,6 +1442,87 @@ def summarizer_node(state: PipelineState) -> dict:
     except Exception as e:
         logger.warning(f"Failed to build action-outlook: {e}")
         action_outlook = None
+
+    # Append Market Intelligence as Appendix (not used in sizing decisions)
+    dual_llm_research = state.get("dual_llm_research")
+    if dual_llm_research and isinstance(dual_llm_research, dict):
+        appendix_lines = [
+            "",
+            "---",
+            "",
+            "# Appendix: Market Intelligence",
+            "",
+            "_Note: This section contains external context and LLM analysis. It is provided for reference only and **not used in regime classification or sizing decisions**._",
+            "",
+            "## 🤖 Multi-Agent Research Analysis",
+            "",
+        ]
+        
+        context_agent = dual_llm_research.get("context_agent", {})
+        analytical_agent = dual_llm_research.get("analytical_agent", {})
+        
+        if context_agent.get("research"):
+            provider = context_agent.get("provider", "unknown").upper()
+            appendix_lines.extend([
+                f"### Real-Time Context Analysis ({provider})",
+                "",
+            ])
+            appendix_lines.extend(context_agent["research"].strip().splitlines())
+            appendix_lines.append("")
+        
+        if analytical_agent.get("research"):
+            provider = analytical_agent.get("provider", "unknown").upper()
+            appendix_lines.extend([
+                f"### Quantitative Analysis ({provider})",
+                "",
+            ])
+            appendix_lines.extend(analytical_agent["research"].strip().splitlines())
+            appendix_lines.append("")
+        
+        # Add synthesis
+        from src.agents.dual_llm_contradictor import compare_llm_analyses
+        comparison = compare_llm_analyses(
+            context_agent.get("research"),
+            analytical_agent.get("research"),
+        )
+        
+        # Extract CONFIRM/CONTRADICT verdicts from LLM outputs
+        context_verdict = _extract_verdict(context_agent.get("research", ""))
+        analytical_verdict = _extract_verdict(analytical_agent.get("research", ""))
+        
+        # Build synthesis with validation results
+        synthesis_lines = ["### Research Synthesis", ""]
+        
+        # Show verdict summary
+        if context_verdict or analytical_verdict:
+            synthesis_lines.append("**Regime Validation Results:**")
+            if context_verdict:
+                synthesis_lines.append(f"- Context Agent: {context_verdict}")
+            if analytical_verdict:
+                synthesis_lines.append(f"- Analytical Agent: {analytical_verdict}")
+            synthesis_lines.append("")
+        
+        # Calculate confidence adjustment based on verdicts
+        mt_effective_conf_val = mt_effective_conf if 'mt_effective_conf' in locals() else (regime_mt.effective_confidence if regime_mt else 0.5)
+        confidence_adjustment = _calculate_confidence_adjustment(
+            context_verdict, 
+            analytical_verdict,
+            mt_effective_conf_val
+        )
+        
+        if comparison.get("synthesis"):
+            synthesis_lines.extend([
+                f"**Key Insights:** {comparison['synthesis']}",
+                "",
+            ])
+        
+        synthesis_lines.append(f"**Confidence Adjustment:** {confidence_adjustment}")
+        synthesis_lines.append("")
+        synthesis_lines.append("_Note: This confidence adjustment is informational only and does not affect final sizing._")
+        
+        appendix_lines.extend(synthesis_lines)
+        
+        summary_md += "\n".join(appendix_lines)
 
     exec_report = ExecReport(
         symbol=symbol,
@@ -1540,3 +1651,80 @@ def _interpret_fusion(regime_lt, regime_mt, regime_st, ccm_st) -> str:
             lines.append("- High macro coupling → risk-on/off regime dominates.")
 
     return "\n".join(lines) if lines else "No clear fusion pattern."
+
+
+def _generate_storyline(symbol: str, regime: RegimeDecision, unified_score: float, confidence: float) -> str:
+    """Generate a compelling one-line storyline for the report header."""
+    regime_verb = {
+        RegimeLabel.TRENDING: "trends higher",
+        RegimeLabel.VOLATILE_TRENDING: "swings in volatile trend",
+        RegimeLabel.MEAN_REVERTING: "oscillates in range",
+        RegimeLabel.RANDOM: "pauses in indecision",
+        RegimeLabel.UNCERTAIN: "pauses at crossroads",
+    }
+    
+    confidence_phrase = {
+        (0.7, 1.0): "strong conviction",
+        (0.5, 0.7): "moderate confidence",
+        (0.3, 0.5): "low confidence",
+        (0.0, 0.3): "high uncertainty",
+    }
+    
+    score_tension = ""
+    if abs(unified_score) < 0.1:
+        score_tension = "momentum meets caution"
+    elif unified_score > 0.3:
+        score_tension = "momentum builds"
+    elif unified_score < -0.3:
+        score_tension = "reversion pressure mounts"
+    else:
+        score_tension = "signals diverge"
+    
+    verb = regime_verb.get(regime.label, "trades sideways")
+    conf_phrase = next((phrase for (low, high), phrase in confidence_phrase.items() if low <= confidence < high), "uncertain")
+    
+    return f"{symbol} {verb} — {score_tension}."
+
+
+def _generate_narrative_summary(
+    symbol: str,
+    regime: RegimeDecision,
+    unified_score: float,
+    confidence: float,
+    execution_ready: bool,
+    blockers: list
+) -> str:
+    """Generate a narrative summary paragraph."""
+    # Regime description
+    regime_desc = {
+        RegimeLabel.TRENDING: "showing trending characteristics",
+        RegimeLabel.VOLATILE_TRENDING: "in a volatile uptrend",
+        RegimeLabel.MEAN_REVERTING: "exhibiting mean-reverting behavior",
+        RegimeLabel.RANDOM: "displaying random walk dynamics",
+        RegimeLabel.UNCERTAIN: "in an uncertain regime",
+    }
+    
+    # Score interpretation
+    if unified_score >= 0.1:
+        score_interp = f"trending signal (score: {unified_score:+.2f})"
+    elif unified_score <= -0.1:
+        score_interp = f"mean-reverting signal (score: {unified_score:+.2f})"
+    else:
+        score_interp = f"neutral signal (score: {unified_score:+.2f})"
+    
+    # Confidence level
+    conf_level = "high" if confidence >= 0.6 else ("moderate" if confidence >= 0.4 else "low")
+    
+    # Execution status
+    if execution_ready:
+        exec_status = "system is ready to execute"
+    else:
+        blocker_text = ", ".join(blockers[:2]) if len(blockers) <= 2 else f"{blockers[0]} and {len(blockers)-1} other blockers"
+        exec_status = f"execution blocked by {blocker_text}"
+    
+    return (
+        f"{symbol} is {regime_desc.get(regime.label, 'in transition')} with {conf_level} confidence "
+        f"({confidence:.0%}). The unified classifier shows a {score_interp}, indicating "
+        f"{'alignment' if abs(unified_score) > 0.1 else 'mixed signals'} across statistical tests. "
+        f"Currently, the {exec_status}."
+    )

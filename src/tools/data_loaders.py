@@ -19,6 +19,15 @@ from src.adapters.equity_loader import EquityDataLoader
 logger = logging.getLogger(__name__)
 
 
+# Symbol aliases for deprecated/rebranded tickers
+# Maps old ticker → new ticker for Polygon data fetching
+SYMBOL_ALIASES = {
+    'X:MATICUSD': 'X:POLUSD',  # MATIC rebranded to POL (Oct 2024)
+    'MATIC-USD': 'X:POLUSD',
+    'MATICUSD': 'X:POLUSD',
+}
+
+
 class PolygonDataLoader:
     """Loads and caches OHLCV data from Polygon.io using official SDK"""
 

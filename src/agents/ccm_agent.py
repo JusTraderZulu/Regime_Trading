@@ -42,9 +42,29 @@ def ccm_agent_node(state: PipelineState) -> Dict:
         return {"ccm_lt": None, "ccm_mt": None, "ccm_st": None}
 
     context_symbols = ccm_config.get("context_symbols", [])
-    pairs_config = ccm_config.get("pairs", []) or []
+    pairs_config = ccm_config.get("pairs", {}) if isinstance(ccm_config.get("pairs"), dict) else []
     tiers_to_process = ccm_config.get("tiers_for_ccm", ccm_config.get("tiers", ["LT", "MT", "ST"]))
 
+    # Detect target asset class for filtering
+    try:
+        target_asset_class = detect_asset_class(symbol).lower()
+    except Exception:
+        logger.warning(f"Could not detect asset class for {symbol}, using legacy pairs")
+        target_asset_class = None
+    
+    # Filter pairs by asset class if available
+    filtered_pairs_config = []
+    if target_asset_class and isinstance(pairs_config, dict):
+        asset_pairs = pairs_config.get(target_asset_class, [])
+        if asset_pairs:
+            filtered_pairs_config = asset_pairs
+            logger.info(f"Using {len(filtered_pairs_config)} {target_asset_class} CCM pairs")
+        else:
+            logger.info(f"No asset-class pairs for {target_asset_class}, using legacy context_symbols")
+    elif isinstance(pairs_config, list):
+        # Legacy format: flat list of pairs
+        filtered_pairs_config = pairs_config
+    
     # Load context data for each tier
     timeframes = config.get("timeframes", {})
     equity_cfg = config.get("equities", {}) if isinstance(config, dict) else {}
@@ -70,15 +90,18 @@ def ccm_agent_node(state: PipelineState) -> Dict:
         series_lookup: Dict[str, pd.Series] = {symbol: target_series}
 
         required_symbols: Set[str] = set()
-        if pairs_config:
-            for raw_pair in pairs_config:
+        if filtered_pairs_config:
+            for raw_pair in filtered_pairs_config:
                 if isinstance(raw_pair, (list, tuple)) and len(raw_pair) == 2:
                     required_symbols.update(str(asset) for asset in raw_pair)
         else:
+            # Fallback to legacy context_symbols if no pairs configured
             required_symbols.update(context_symbols)
 
         if symbol in required_symbols:
             required_symbols.remove(symbol)
+        
+        logger.debug(f"CCM {tier_str}: target={symbol}, context={sorted(required_symbols)}")
 
         # Load context data
         tier_config = timeframes.get(tier_str, {})

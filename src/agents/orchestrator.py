@@ -807,7 +807,11 @@ def detect_regime_node(state: PipelineState) -> Dict:
             continue
 
         try:
-            regime = classify_regime(features, ccm, config, timestamp)
+            # Get transition metrics for this tier (for persistence damping)
+            transition_metrics_state = state.get("transition_metrics", {})
+            tier_tm = transition_metrics_state.get(tier_str)
+            
+            regime = classify_regime(features, ccm, config, timestamp, tier_tm)
             tier_cfg = tier_overrides.get(tier_str, {}) if tier_overrides else {}
             data_df = state.get(f"data_{tier_key}")
             if hysteresis_enabled:
@@ -818,6 +822,41 @@ def detect_regime_node(state: PipelineState) -> Dict:
                 )
                 memory_modified = True
             regime = _enrich_regime_decision(regime, tier_cfg, gating_config, data_df)
+            
+            # Add consistency checking
+            from src.analytics.consistency_checker import check_consistency
+            
+            # Determine blockers from conflicts
+            blockers = []
+            if regime.conflicts:
+                if regime.conflicts.higher_tf_disagree:
+                    blockers.append("higher_tf_disagree")
+                if regime.conflicts.event_blackout:
+                    blockers.append("event_blackout")
+                if regime.conflicts.volatility_gate_block:
+                    blockers.append("volatility_gate_block")
+                if regime.conflicts.execution_blackout:
+                    blockers.append("execution_blackout")
+            
+            # Check consistency
+            consistency_score, consistency_issues = check_consistency(
+                regime=regime.label,
+                hurst=regime.hurst_avg,
+                vr=regime.vr_statistic,
+                confidence=regime.effective_confidence or regime.confidence,
+                position_size=regime.confidence if not blockers else 0.0,
+                blockers=blockers
+            )
+            
+            # Update regime with consistency score
+            regime = regime.model_copy(update={"consistency_score": consistency_score})
+            
+            # Log consistency issues if any
+            if consistency_issues:
+                logger.warning(
+                    f"{tier_str} consistency issues (score={consistency_score:.2f}): "
+                    f"{', '.join(consistency_issues)}"
+                )
 
             if events_config.get("enabled", False) and tier_str in events_config.get("tiers", []):
                 lead = int(events_config.get("lead_minutes", 30))
@@ -1017,170 +1056,41 @@ def classify_regime(
     ccm,
     config: Dict,
     timestamp: datetime,
+    transition_metrics: Optional[Dict] = None,
 ) -> RegimeDecision:
     """
-    Enhanced regime classification using weighted voting system.
+    Enhanced regime classification using UnifiedRegimeClassifier.
     
-    Combines multiple signals:
+    Uses weighted combination of:
     - Hurst exponent (40% weight)
-    - Variance Ratio (30% weight)
+    - Variance Ratio (40% weight)
     - ADF test (20% weight)
-    - Volatility (10% weight)
+    
+    With persistence damping from transition metrics and consistency checking.
+    
+    Args:
+        features: Statistical features bundle
+        ccm: Cross-asset correlation metrics
+        config: Configuration dict
+        timestamp: Analysis timestamp
+        transition_metrics: Optional transition metrics for persistence damping
+        
+    Returns:
+        RegimeDecision with unified scoring and consistency validation
     """
-    # Average Hurst
+    from src.analytics.regime_classifier import UnifiedRegimeClassifier, apply_llm_adjustment
+    from src.analytics.consistency_checker import check_consistency
+    
+    # Initialize unified classifier
+    classifier = UnifiedRegimeClassifier()
+    
+    # Classify regime with persistence damping
+    regime_score = classifier.classify(features, transition_metrics)
+    
+    # Average Hurst for rationale
     hurst_avg = (features.hurst_rs + features.hurst_dfa) / 2
-
-    # Get thresholds and weights
-    regime_config = config.get("regime", {})
-    hurst_thresholds = regime_config.get("hurst_thresholds", {})
-    vr_thresholds = regime_config.get("vr_thresholds", {})
-    weights = regime_config.get("signal_weights", {
-        "hurst": 0.35,
-        "vr": 0.25,
-        "acf": 0.20,
-        "adf": 0.15,
-        "volatility": 0.05
-    })
-
-    h_mean_rev = hurst_thresholds.get("mean_reverting", 0.48)
-    h_trend = hurst_thresholds.get("trending", 0.52)
-    vr_mean_rev = vr_thresholds.get("mean_reverting", 0.97)
-    vr_trend = vr_thresholds.get("trending", 1.03)
-
-    # Initialize vote counters
-    votes = {
-        RegimeLabel.TRENDING: 0.0,
-        RegimeLabel.MEAN_REVERTING: 0.0,
-        RegimeLabel.RANDOM: 0.0,
-    }
     
-    # Signal 1: Hurst Exponent (40% weight)
-    if hurst_avg < h_mean_rev:
-        votes[RegimeLabel.MEAN_REVERTING] += weights["hurst"]
-    elif hurst_avg > h_trend:
-        votes[RegimeLabel.TRENDING] += weights["hurst"]
-    else:
-        votes[RegimeLabel.RANDOM] += weights["hurst"]
-    
-    # Signal 2: Variance Ratio (30% weight)
-    if features.vr_statistic < vr_mean_rev and features.vr_p_value < 0.05:
-        votes[RegimeLabel.MEAN_REVERTING] += weights["vr"]
-    elif features.vr_statistic > vr_trend and features.vr_p_value < 0.05:
-        votes[RegimeLabel.TRENDING] += weights["vr"]
-    else:
-        # VR inconclusive or not significant
-        votes[RegimeLabel.RANDOM] += weights["vr"] * 0.5
-    
-    # Signal 3: Autocorrelation (20% weight) - NEW!
-    if features.acf_regime:
-        acf_weight = weights["acf"]
-        if features.acf_regime == "mean_reverting":
-            votes[RegimeLabel.MEAN_REVERTING] += acf_weight
-        elif features.acf_regime == "trending":
-            votes[RegimeLabel.TRENDING] += acf_weight
-        else:
-            votes[RegimeLabel.RANDOM] += acf_weight * 0.5
-    
-    # Signal 4: ADF Test (15% weight)
-    # Low p-value = stationary = mean-reverting
-    if features.adf_p_value < 0.01:  # Strong stationarity
-        votes[RegimeLabel.MEAN_REVERTING] += weights["adf"]
-    elif features.adf_p_value > 0.10:  # Non-stationary
-        votes[RegimeLabel.TRENDING] += weights["adf"]
-    else:
-        votes[RegimeLabel.RANDOM] += weights["adf"] * 0.5
-    
-    # Signal 5: Volatility Pattern (5% weight)
-    vol_weight = weights.get("volatility", 0.05)
-    vol_cfg = regime_config.get("volatility_signal", {})
-    realized_threshold = vol_cfg.get("realized_vol_threshold", 0.03)
-    garch_high_ratio = vol_cfg.get("garch_high_ratio", 1.25)
-    garch_low_ratio = vol_cfg.get("garch_low_ratio", 0.85)
-    garch_ratio = getattr(features, "garch_vol_ratio", None)
-
-    if garch_ratio is not None:
-        if garch_ratio >= garch_high_ratio:
-            votes[RegimeLabel.TRENDING] += vol_weight
-        elif garch_ratio <= garch_low_ratio:
-            votes[RegimeLabel.MEAN_REVERTING] += vol_weight
-        else:
-            votes[RegimeLabel.RANDOM] += vol_weight * 0.5
-    else:
-        if features.returns_vol > realized_threshold:
-            votes[RegimeLabel.TRENDING] += vol_weight * 0.5
-        else:
-            votes[RegimeLabel.RANDOM] += vol_weight * 0.5
-
-    # Auxiliary CCM vote adjustment based on directional leadership
-    ccm_cfg = config.get("ccm", {}) if isinstance(config, dict) else {}
-    ccm_vote_weight = float(ccm_cfg.get("vote_weight", 0.05))
-    ccm_rho_threshold = float(ccm_cfg.get("rho_threshold", 0.2))
-
-    if ccm and getattr(ccm, "pairs", None):
-        ccm_bias = 0.0
-        for pair in ccm.pairs:
-            if features.symbol not in {pair.asset_a, pair.asset_b}:
-                continue
-
-            rho_candidates = [
-                value for value in (pair.rho_ab, pair.rho_ba) if value is not None
-            ]
-            if not rho_candidates or max(rho_candidates) < ccm_rho_threshold:
-                continue
-
-            if pair.asset_a == features.symbol:
-                if pair.interpretation == "A_leads_B":
-                    ccm_bias += ccm_vote_weight
-                elif pair.interpretation == "B_leads_A":
-                    ccm_bias -= ccm_vote_weight
-            elif pair.asset_b == features.symbol:
-                if pair.interpretation == "B_leads_A":
-                    ccm_bias += ccm_vote_weight
-                elif pair.interpretation == "A_leads_B":
-                    ccm_bias -= ccm_vote_weight
-
-        if ccm_bias > 0:
-            votes[RegimeLabel.TRENDING] += ccm_bias
-        elif ccm_bias < 0:
-            votes[RegimeLabel.MEAN_REVERTING] += abs(ccm_bias)
-    
-    # Select regime with highest vote
-    label = max(votes, key=votes.get)
-    base_confidence = votes[label]
-    sorted_vote_values = sorted(votes.values(), reverse=True)
-    vote_margin = 0.0
-    if sorted_vote_values:
-        if len(sorted_vote_values) == 1:
-            vote_margin = sorted_vote_values[0]
-        else:
-            vote_margin = sorted_vote_values[0] - sorted_vote_values[1]
-    
-    # Check for volatile trending (high vol + trending)
-    high_vol_signal = False
-    if garch_ratio is not None:
-        high_vol_signal = garch_ratio >= garch_high_ratio
-    else:
-        high_vol_signal = features.returns_vol > realized_threshold
-
-    if label == RegimeLabel.TRENDING and high_vol_signal:
-        label = RegimeLabel.VOLATILE_TRENDING
-        base_confidence += 0.05  # Bonus for specific sub-regime
-
-    # Adjust with CCM context
-    if ccm is not None:
-        # Boost confidence if high sector coupling + trending
-        if label in [RegimeLabel.TRENDING, RegimeLabel.VOLATILE_TRENDING]:
-            if ccm.sector_coupling > 0.6:
-                base_confidence += 0.05
-
-        # Penalize if high macro coupling but conflicting signals
-        if votes[RegimeLabel.RANDOM] > 0.3 and ccm.macro_coupling > 0.6:
-            base_confidence -= 0.1
-
-    # Clamp confidence
-    confidence = max(0.0, min(1.0, base_confidence))
-
-    # Generate detailed rationale with all signals
+    # Build detailed rationale
     rationale_parts = [
         f"H={hurst_avg:.2f}",
     ]
@@ -1199,19 +1109,25 @@ def classify_regime(
         f"ADF_p={features.adf_p_value:.2f}",
     ])
     
-    # Add ACF signal
+    # Add ACF signal if available
     if features.acf1 is not None:
         rationale_parts.append(f"ACF1={features.acf1:.2f}")
     if features.acf_regime:
         rationale_parts.append(f"ACF→{features.acf_regime}")
     
-    # Add voting breakdown
+    # Add unified scoring breakdown
     rationale_parts.append(
-        f"| Votes: T={votes[RegimeLabel.TRENDING]:.2f}, "
-        f"MR={votes[RegimeLabel.MEAN_REVERTING]:.2f}, "
-        f"R={votes[RegimeLabel.RANDOM]:.2f}"
+        f"| Score: {regime_score.score:+.2f} "
+        f"(H:{regime_score.hurst_component:+.2f}, "
+        f"VR:{regime_score.vr_component:+.2f}, "
+        f"ADF:{regime_score.adf_component:+.2f})"
     )
-
+    
+    # Add persistence factor if damping applied
+    if regime_score.persistence_factor < 1.0:
+        rationale_parts.append(f"persist={regime_score.persistence_factor:.2f}")
+    
+    # Add CCM context
     if ccm and getattr(ccm, "pairs", None):
         lead_pair = next(
             (pair for pair in ccm.pairs if features.symbol in {pair.asset_a, pair.asset_b}),
@@ -1229,26 +1145,44 @@ def classify_regime(
                 )
     
     rationale = ", ".join(rationale_parts)
-
+    
     if ccm:
         rationale += f" | CCM: sector={ccm.sector_coupling:.2f}, macro={ccm.macro_coupling:.2f}"
-
-    return RegimeDecision(
+    
+    # Compute vote margin for legacy compatibility
+    # Map unified score to vote margin (0-0.5 range)
+    vote_margin = abs(regime_score.score) * 0.5
+    
+    # Create base decision
+    decision = RegimeDecision(
         tier=features.tier,
         symbol=features.symbol,
         timestamp=timestamp,
-        label=label,
-        state=label.value,
-        confidence=confidence,
+        schema_version="1.2",  # Mark as using unified classifier
+        label=regime_score.regime,
+        state=regime_score.regime.value,
+        confidence=regime_score.raw_confidence,
+        effective_confidence=regime_score.effective_confidence,
+        unified_score=regime_score.score,
         hurst_avg=hurst_avg,
         vr_statistic=features.vr_statistic,
         adf_p_value=features.adf_p_value,
         sector_coupling=ccm.sector_coupling if ccm else None,
         macro_coupling=ccm.macro_coupling if ccm else None,
         rationale=rationale,
-        base_label=label,
+        base_label=regime_score.regime,
         vote_margin=vote_margin,
     )
+    
+    # Log confidence propagation
+    logger.debug(
+        f"{features.tier} {features.symbol}: "
+        f"raw_conf={regime_score.raw_confidence:.2f} → "
+        f"eff_conf={regime_score.effective_confidence:.2f} "
+        f"(persist={regime_score.persistence_factor:.2f})"
+    )
+    
+    return decision
 
 
 # ============================================================================
@@ -1550,8 +1484,45 @@ def export_signals_node(state: PipelineState) -> Dict:
         # Map regime to side (-1, 0, 1)
         side = regime_to_side(regime.label)
         
-        # Use confidence as weight (scaled to 0-1)
-        weight = regime.confidence if side != 0 else 0.0
+        # Apply gate enforcement
+        from src.analytics.regime_classifier import check_execution_gates
+        
+        # Build gates dict from regime
+        gates_dict = {}
+        if regime.gates:
+            gates_dict['volatility_gate_block'] = getattr(regime.conflicts, 'volatility_gate_block', False) if regime.conflicts else False
+            gates_dict['execution_blackout'] = getattr(regime.conflicts, 'execution_blackout', False) if regime.conflicts else False
+        
+        # Get higher tier regime for alignment check
+        higher_tier_regime = None
+        if tier_name == "ST":
+            regime_mt = state.get("regime_mt")
+            higher_tier_regime = regime_mt.label if regime_mt else None
+        elif tier_name == "US":
+            regime_st = state.get("regime_st")
+            higher_tier_regime = regime_st.label if regime_st else None
+        
+        # Check execution gates
+        execution_ready, active_blockers, post_gate_plan = check_execution_gates(
+            regime=regime.label,
+            confidence=regime.effective_confidence or regime.confidence,
+            gates=gates_dict,
+            higher_tier_regime=higher_tier_regime
+        )
+        
+        # Use effective confidence if available, fall back to raw confidence
+        base_weight = regime.effective_confidence if regime.effective_confidence is not None else regime.confidence
+        
+        # Apply gate enforcement: zero weight if not execution ready
+        if not execution_ready:
+            weight = 0.0
+            logger.info(
+                f"  {tier_name}: Gates blocking execution - blockers: {active_blockers}"
+            )
+        elif side != 0:
+            weight = base_weight
+        else:
+            weight = 0.0
         
         # Get strategy info from backtest results
         strategy_name = None
@@ -1667,6 +1638,12 @@ def export_signals_node(state: PipelineState) -> Dict:
             mid=float(mid_price) if mid_price is not None else None,
             strategy_name=strategy_name,
             strategy_params=strategy_params,
+            # Gate enforcement fields
+            execution_ready=execution_ready,
+            gate_blockers=','.join(active_blockers) if active_blockers else None,
+            effective_confidence=regime.effective_confidence,
+            unified_score=regime.unified_score,
+            consistency_score=regime.consistency_score,
             # Microstructure
             microstructure_data_quality=microstructure_data_quality,
             microstructure_market_efficiency=microstructure_market_efficiency,
@@ -1701,10 +1678,15 @@ def export_signals_node(state: PipelineState) -> Dict:
         )
         
         signals.append(signal)
+        
+        # Enhanced logging with gate enforcement status
+        gate_status = "✅ EXEC" if execution_ready else f"🚫 BLOCKED: {', '.join(active_blockers)}"
+        eff_conf_str = f"eff={regime.effective_confidence:.2f}" if regime.effective_confidence else ""
         logger.info(
             f"  {tier_name}: {qc_symbol} {regime.label.value} | "
+            f"{gate_status} | "
             f"strategy={strategy_name or 'N/A'} | "
-            f"side={side} weight={weight:.2f} conf={regime.confidence:.2f}"
+            f"side={side} weight={weight:.2f} conf={regime.confidence:.2f} {eff_conf_str}"
         )
     
     if not signals:

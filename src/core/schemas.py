@@ -312,10 +312,29 @@ class RegimeDecision(BaseModel):
     timestamp: datetime
 
     schema_version: str = Field(
-        default="1.1", description="Version tag for downstream schema consumers"
+        default="1.2", description="Version tag for downstream schema consumers (v1.2: unified scoring)"
     )
     label: RegimeLabel
-    confidence: float = Field(ge=0.0, le=1.0, description="Confidence in classification")
+    confidence: float = Field(ge=0.0, le=1.0, description="Raw confidence from classification")
+    
+    # NEW: Enhanced confidence tracking (v1.2)
+    effective_confidence: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="Confidence after persistence damping"
+    )
+    unified_score: Optional[float] = Field(
+        default=None, ge=-1.0, le=1.0,
+        description="Unified regime score (Hurst + VR + ADF weighted)"
+    )
+    llm_adjustment: Optional[float] = Field(
+        default=None, ge=-0.2, le=0.2,
+        description="LLM validation adjustment to confidence"
+    )
+    consistency_score: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="Internal consistency score (regime vs statistics)"
+    )
+    
     state: Optional[str] = Field(
         default=None, description="String alias for regime label (execution contracts)"
     )
