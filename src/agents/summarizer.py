@@ -1295,6 +1295,10 @@ def summarizer_node(state: PipelineState) -> dict:
     
     # Append Second-Level Analysis section if present
     try:
+        # Debug: Check all state keys
+        state_keys = list(state.keys()) if hasattr(state, 'keys') else []
+        logger.info(f"State keys in summarizer: {[k for k in state_keys if 'second' in k.lower() or 'micro' in k.lower()]}")
+        
         second_level = state.get("second_level_analysis")
         logger.info(f"Checking for second-level data in state: {second_level is not None}")
         if second_level:

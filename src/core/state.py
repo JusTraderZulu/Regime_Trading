@@ -61,6 +61,9 @@ class PipelineState(TypedDict, total=False):
     microstructure_lt: Optional[MicrostructureFeatures]
     microstructure_mt: Optional[MicrostructureFeatures]
     microstructure_st: Optional[MicrostructureFeatures]
+    
+    # === Second-Level Analysis (sub-minute dynamics) ===
+    second_level_analysis: Optional[Dict]  # Second-level metrics (intra-minute, bursts, etc.)
 
     # === Regime (per tier) ===
     regime_lt: Optional[RegimeDecision]
