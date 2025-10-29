@@ -1296,6 +1296,7 @@ def summarizer_node(state: PipelineState) -> dict:
     # Append Second-Level Analysis section if present
     try:
         second_level = state.get("second_level_analysis")
+        logger.info(f"Checking for second-level data in state: {second_level is not None}")
         if second_level:
             sl_lines = ["", "## 🔬 Second-Level Analysis (Sub-Minute Dynamics)", ""]
             
