@@ -108,6 +108,11 @@ def microstructure_agent_node(state: PipelineState) -> PipelineState:
 
             if tier_results:
                 microstructure_results[tier] = tier_results
+                
+                # Attach second-level results if available
+                if second_level_results:
+                    tier_results.second_level_data = second_level_results
+                
                 logger.info(f"✓ Microstructure analysis complete for tier {tier}")
 
                 # Log key findings
@@ -118,6 +123,10 @@ def microstructure_agent_node(state: PipelineState) -> PipelineState:
             else:
                 logger.warning(f"Microstructure analysis failed for tier {tier}")
 
+        # Store second-level results in state for reporting
+        if use_second_data and second_level_results:
+            state['second_level_analysis'] = second_level_results
+        
         # Update state with microstructure results using proper field names
         if microstructure_results:
             # Set individual tier fields with proper MicrostructureFeatures objects

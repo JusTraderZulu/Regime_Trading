@@ -1292,6 +1292,55 @@ def summarizer_node(state: PipelineState) -> dict:
             logger.info(f"Added data health section (issues: {has_issues}, second_aggs: {has_second_aggs})")
     except Exception as exc:
         logger.debug(f"Data health section skipped: {exc}")
+    
+    # Append Second-Level Analysis section if present
+    try:
+        second_level = state.get("second_level_analysis")
+        if second_level:
+            sl_lines = ["", "## 🔬 Second-Level Analysis (Sub-Minute Dynamics)", ""]
+            
+            sl_lines.append(f"**Analyzed**: {second_level.get('n_seconds', 0):,} second bars")
+            sl_lines.append("")
+            
+            # Intra-minute volatility
+            intra_vol = second_level.get('intra_minute_volatility', {})
+            if intra_vol.get('mean_intra_minute_vol'):
+                sl_lines.append("**Intra-Minute Volatility:**")
+                sl_lines.append(f"- Average: {intra_vol['mean_intra_minute_vol']:.1%}")
+                sl_lines.append(f"- Max: {intra_vol['max_intra_minute_vol']:.1%}")
+                sl_lines.append(f"- Stability: {intra_vol['vol_volatility']:.2f}")
+                sl_lines.append("")
+            
+            # Sub-minute trends
+            trends = second_level.get('sub_minute_trends', {})
+            if trends.get('trend_persistence'):
+                sl_lines.append("**Sub-Minute Momentum:**")
+                sl_lines.append(f"- Trend persistence: {trends['trend_persistence']:.1f} seconds (avg run)")
+                sl_lines.append(f"- Max up run: {trends.get('max_up_run_seconds', 0):.0f}s")
+                sl_lines.append(f"- Max down run: {trends.get('max_down_run_seconds', 0):.0f}s")
+                sl_lines.append("")
+            
+            # Volume bursts
+            bursts = second_level.get('volume_bursts', {})
+            if bursts.get('n_bursts'):
+                sl_lines.append("**Volume Dynamics:**")
+                sl_lines.append(f"- Bursts detected: {bursts['n_bursts']} ({bursts['burst_frequency']:.1%} of time)")
+                sl_lines.append(f"- Normal volume: {bursts['normal_volume']:.0f}")
+                sl_lines.append(f"- Max burst: {bursts['max_burst_size']:.0f}")
+                sl_lines.append("")
+            
+            # Price jumps
+            jumps = second_level.get('price_jumps', {})
+            if jumps.get('n_jumps'):
+                sl_lines.append("**Price Jumps:**")
+                sl_lines.append(f"- Jumps detected: {jumps['n_jumps']}")
+                sl_lines.append(f"- Max jump: {jumps['max_jump_size']:.2%}")
+                sl_lines.append("")
+            
+            summary_md += "\n" + "\n".join(sl_lines)
+            logger.info("Added second-level analysis section to report")
+    except Exception as exc:
+        logger.debug(f"Second-level section skipped: {exc}")
 
     try:
         artifacts_path = Path(artifacts_dir)
