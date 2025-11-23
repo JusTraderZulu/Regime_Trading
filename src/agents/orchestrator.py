@@ -1629,6 +1629,7 @@ def export_signals_node(state: PipelineState) -> Dict:
         signal = SignalRow(
             time=bar_time,
             symbol=qc_symbol,
+            tier=tier_name,
             asset_class=asset_class,
             venue=venue,
             regime=regime.label.value,

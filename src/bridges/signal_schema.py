@@ -12,16 +12,19 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 class SignalRow(BaseModel):
     """
     Single signal row for Lean consumption.
-    
+
     Represents a trading signal at a specific bar-end time.
     Must be strictly deterministic (no look-ahead bias).
     """
-    
+
     time: datetime = Field(
         description="Bar-end timestamp in UTC (RFC3339). Must be ≤ current time."
     )
     symbol: str = Field(
         description="QuantConnect symbol format (e.g., 'BTCUSD', 'EURUSD')"
+    )
+    tier: str = Field(
+        description="Market tier (LT/LT, MT/Medium-term, ST/Short-term) for multi-timeframe signals"
     )
     asset_class: Literal["FX", "CRYPTO", "EQUITY"] = Field(
         description="Asset class for position sizing logic"
@@ -248,6 +251,7 @@ class SignalRow(BaseModel):
         return {
             "time": self.time.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "symbol": self.symbol,
+            "tier": self.tier,
             "asset_class": self.asset_class,
             "venue": self.venue or "",
             "regime": self.regime,
@@ -305,6 +309,7 @@ class SignalRow(BaseModel):
             "example": {
                 "time": "2024-01-15T12:00:00Z",
                 "symbol": "BTCUSD",
+                "tier": "MT",
                 "asset_class": "CRYPTO",
                 "venue": "GDAX",
                 "regime": "trending",
@@ -349,13 +354,14 @@ class SignalsTable(BaseModel):
     
     @model_validator(mode="after")
     def validate_no_duplicate_times(self):
-        """Warn if duplicate timestamps exist (same symbol + time)"""
+        """Ensure no duplicate signals (same symbol + time + tier)"""
         seen = set()
         for signal in self.signals:
-            key = (signal.symbol, signal.time)
+            key = (signal.symbol, signal.time, signal.tier)
             if key in seen:
-                # Just warn, don't fail (could be multiple tiers)
-                pass
+                raise ValueError(
+                    f"Duplicate signal found: {signal.symbol} at {signal.time} for tier {signal.tier}"
+                )
             seen.add(key)
         return self
     

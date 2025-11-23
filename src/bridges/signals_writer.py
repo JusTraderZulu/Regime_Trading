@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 CSV_HEADERS = [
     "time",
     "symbol",
+    "tier",
     "asset_class",
     "venue",
     "regime",
@@ -178,7 +179,7 @@ def read_signals_csv(csv_path: Path) -> List[SignalRow]:
         
         for row in reader:
             # Convert empty strings to None for optional fields
-            for key in ["venue", "mid", "spread", "pip_value", "fee_bps", "funding_apr"]:
+            for key in ["tier", "venue", "mid", "spread", "pip_value", "fee_bps", "funding_apr"]:
                 if row.get(key) == "":
                     row[key] = None
             
